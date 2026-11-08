@@ -123,15 +123,143 @@ func TestCalculateRiskDedupCapsAndDeterminism(t *testing.T) {
 }
 
 func TestPolicyRejectsInvalidWeights(t *testing.T) {
+	// Invalid confidence multiplier > 100
 	policy := DefaultPolicy()
 	policy.ConfidenceMultipliers[ConfidenceHigh] = 101
 	if err := policy.Validate(); err == nil {
 		t.Fatal("expected invalid confidence multiplier error")
 	}
+
+	// Negative severity weight
 	policy = DefaultPolicy()
 	policy.SeverityWeights[SeverityCritical] = -1
 	if err := policy.Validate(); err == nil {
 		t.Fatal("expected invalid severity weight error")
+	}
+
+	// Decreasing severity weights
+	policy = DefaultPolicy()
+	policy.SeverityWeights[SeverityHigh] = 10
+	policy.SeverityWeights[SeverityMedium] = 20
+	if err := policy.Validate(); err == nil {
+		t.Fatal("expected non-monotonic severity weight error")
+	}
+
+	// Non-zero informational weight
+	policy = DefaultPolicy()
+	policy.SeverityWeights[SeverityInformational] = 5
+	if err := policy.Validate(); err == nil {
+		t.Fatal("expected non-zero informational weight error")
+	}
+
+	// Negative category cap
+	policy = DefaultPolicy()
+	policy.CategoryContributionCaps["url-structure"] = -1
+	if err := policy.Validate(); err == nil {
+		t.Fatal("expected negative category cap error")
+	}
+
+	// Category cap > MaximumScore
+	policy = DefaultPolicy()
+	policy.CategoryContributionCaps["url-structure"] = 150
+	if err := policy.Validate(); err == nil {
+		t.Fatal("expected category cap > max score error")
+	}
+
+	// Empty policy ID
+	policy = DefaultPolicy()
+	policy.ID = ""
+	if err := policy.Validate(); err == nil {
+		t.Fatal("expected empty policy ID error")
+	}
+
+	// Empty policy Version
+	policy = DefaultPolicy()
+	policy.Version = ""
+	if err := policy.Validate(); err == nil {
+		t.Fatal("expected empty policy Version error")
+	}
+
+	// Invalid MaximumScore
+	policy = DefaultPolicy()
+	policy.MaximumScore = 0
+	if err := policy.Validate(); err == nil {
+		t.Fatal("expected invalid maximum score error")
+	}
+	policy.MaximumScore = 101
+	if err := policy.Validate(); err == nil {
+		t.Fatal("expected invalid maximum score error")
+	}
+
+	// Invalid FindingContributionCap
+	policy = DefaultPolicy()
+	policy.FindingContributionCap = 0
+	if err := policy.Validate(); err == nil {
+		t.Fatal("expected invalid finding contribution cap error")
+	}
+	policy.FindingContributionCap = 150
+	if err := policy.Validate(); err == nil {
+		t.Fatal("expected invalid finding contribution cap error")
+	}
+}
+
+func TestCapsAndBoundariesEnforced(t *testing.T) {
+	// Test per-finding cap: set finding cap to 10
+	customPolicy := DefaultPolicy()
+	customPolicy.FindingContributionCap = 10
+	// CERT_EXPIRED is SeverityHigh (35) with ConfidenceHigh (100) -> raw is 35, capped at 10
+	findings, err := NormalizeFindings([]Observation{{Code: "CERT_EXPIRED", Evidence: "leaf expired"}}, "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := CalculateRisk(findings, customPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OverallScore != 10 {
+		t.Fatalf("expected finding contribution cap to limit score to 10, got %d", res.OverallScore)
+	}
+	if res.Findings[0].ScoreImpact != 10 {
+		t.Fatalf("expected finding score impact 10, got %d", res.Findings[0].ScoreImpact)
+	}
+
+	// Test category cap: certificate-validity default cap is 45
+	// CERT_EXPIRED (35) + CERT_INTERMEDIATE_EXPIRED (35) = 70 -> capped at 45
+	findings, err = NormalizeFindings([]Observation{
+		{Code: "CERT_EXPIRED", Evidence: "leaf expired"},
+		{Code: "CERT_INTERMEDIATE_EXPIRED", Evidence: "intermediate expired"},
+	}, "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = CalculateRisk(findings, DefaultPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OverallScore != 45 {
+		t.Fatalf("expected category cap to limit score to 45, got %d", res.OverallScore)
+	}
+
+	// Test overall cap (100): many high findings across different categories cannot exceed 100
+	obs := []Observation{
+		{Code: "CERT_EXPIRED", Evidence: "leaf expired"},
+		{Code: "BRAND_EXACT_LABEL", Evidence: "brand"},
+		{Code: "WEB_HTTPS_DOWNGRADE", Evidence: "downgrade"},
+		{Code: "WEB_HTML_MIXED_CONTENT_SCRIPT", Evidence: "mixed script"},
+	}
+	findings, err = NormalizeFindings(obs, "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = CalculateRisk(findings, DefaultPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OverallScore > 100 || res.OverallScore < 0 {
+		t.Fatalf("score out of bounds [0, 100]: %d", res.OverallScore)
+	}
+	if res.Classification != RiskCritical {
+		t.Fatalf("score >= 80 should be critical, got: %s", res.Classification)
 	}
 }
 

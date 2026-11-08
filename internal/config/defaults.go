@@ -16,6 +16,11 @@ func Default() *Config {
 
 	return &Config{
 		Application: ApplicationConfig{Name: "Bouclier", Version: "0.1.0-dev", Environment: "development"},
+		HTTPServer: HTTPServerConfig{
+			Host: "127.0.0.1", Port: 8081,
+			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,
+			WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
+		},
 		Scanner: ScannerConfig{
 			HTTPTimeout: 8 * time.Second, TLSHandshakeTimeout: 5 * time.Second,
 			MaxRedirects: 5, MaxConcurrentScans: 10, UserAgent: "Bouclier/0.1.0-dev",

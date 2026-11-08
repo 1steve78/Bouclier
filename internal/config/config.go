@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -13,10 +14,21 @@ import (
 // Config contains the settings used by the Bouclier application.
 type Config struct {
 	Application ApplicationConfig `json:"application"`
+	HTTPServer  HTTPServerConfig  `json:"http_server"`
 	Scanner     ScannerConfig     `json:"scanner"`
 	Storage     StorageConfig     `json:"storage"`
 	ThreatIntel ThreatIntelConfig `json:"threat_intelligence"`
 	Logging     LoggingConfig     `json:"logging"`
+}
+
+// HTTPServerConfig contains settings for the Bouclier HTTP API server.
+type HTTPServerConfig struct {
+	Host              string        `json:"host"`
+	Port              int           `json:"port"`
+	ReadHeaderTimeout time.Duration `json:"read_header_timeout"`
+	ReadTimeout       time.Duration `json:"read_timeout"`
+	WriteTimeout      time.Duration `json:"write_timeout"`
+	IdleTimeout       time.Duration `json:"idle_timeout"`
 }
 
 type ApplicationConfig struct {
@@ -50,7 +62,15 @@ type LoggingConfig struct {
 
 type jsonConfig struct {
 	Application ApplicationConfig `json:"application"`
-	Scanner     struct {
+	HTTPServer  struct {
+		Host              string `json:"host"`
+		Port              int    `json:"port"`
+		ReadHeaderTimeout string `json:"read_header_timeout"`
+		ReadTimeout       string `json:"read_timeout"`
+		WriteTimeout      string `json:"write_timeout"`
+		IdleTimeout       string `json:"idle_timeout"`
+	} `json:"http_server"`
+	Scanner struct {
 		HTTPTimeout         string `json:"http_timeout"`
 		TLSHandshakeTimeout string `json:"tls_handshake_timeout"`
 		MaxRedirects        int    `json:"max_redirects"`
@@ -71,7 +91,15 @@ type jsonConfig struct {
 func (c Config) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Application ApplicationConfig `json:"application"`
-		Scanner     struct {
+		HTTPServer  struct {
+			Host              string `json:"host"`
+			Port              int    `json:"port"`
+			ReadHeaderTimeout string `json:"read_header_timeout"`
+			ReadTimeout       string `json:"read_timeout"`
+			WriteTimeout      string `json:"write_timeout"`
+			IdleTimeout       string `json:"idle_timeout"`
+		} `json:"http_server"`
+		Scanner struct {
 			HTTPTimeout         string `json:"http_timeout"`
 			TLSHandshakeTimeout string `json:"tls_handshake_timeout"`
 			MaxRedirects        int    `json:"max_redirects"`
@@ -89,6 +117,18 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		Logging LoggingConfig `json:"logging"`
 	}{
 		Application: c.Application,
+		HTTPServer: struct {
+			Host              string `json:"host"`
+			Port              int    `json:"port"`
+			ReadHeaderTimeout string `json:"read_header_timeout"`
+			ReadTimeout       string `json:"read_timeout"`
+			WriteTimeout      string `json:"write_timeout"`
+			IdleTimeout       string `json:"idle_timeout"`
+		}{
+			c.HTTPServer.Host, c.HTTPServer.Port,
+			c.HTTPServer.ReadHeaderTimeout.String(), c.HTTPServer.ReadTimeout.String(),
+			c.HTTPServer.WriteTimeout.String(), c.HTTPServer.IdleTimeout.String(),
+		},
 		Scanner: struct {
 			HTTPTimeout         string `json:"http_timeout"`
 			TLSHandshakeTimeout string `json:"tls_handshake_timeout"`
@@ -110,7 +150,20 @@ func (c Config) MarshalJSON() ([]byte, error) {
 
 func (c *Config) UnmarshalJSON(data []byte) error {
 	d := Default()
-	w := jsonConfig{Application: d.Application, Logging: d.Logging}
+	w := jsonConfig{Application: d.Application, HTTPServer: struct {
+		Host              string `json:"host"`
+		Port              int    `json:"port"`
+		ReadHeaderTimeout string `json:"read_header_timeout"`
+		ReadTimeout       string `json:"read_timeout"`
+		WriteTimeout      string `json:"write_timeout"`
+		IdleTimeout       string `json:"idle_timeout"`
+	}{
+		Host: d.HTTPServer.Host, Port: d.HTTPServer.Port,
+		ReadHeaderTimeout: d.HTTPServer.ReadHeaderTimeout.String(),
+		ReadTimeout:       d.HTTPServer.ReadTimeout.String(),
+		WriteTimeout:      d.HTTPServer.WriteTimeout.String(),
+		IdleTimeout:       d.HTTPServer.IdleTimeout.String(),
+	}, Logging: d.Logging}
 	w.Scanner.HTTPTimeout = d.Scanner.HTTPTimeout.String()
 	w.Scanner.TLSHandshakeTimeout = d.Scanner.TLSHandshakeTimeout.String()
 	w.Scanner.MaxRedirects = d.Scanner.MaxRedirects
@@ -158,8 +211,29 @@ func (w jsonConfig) toConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	readHeaderTimeout, err := parse("http_server.read_header_timeout", w.HTTPServer.ReadHeaderTimeout)
+	if err != nil {
+		return nil, err
+	}
+	readTimeout, err := parse("http_server.read_timeout", w.HTTPServer.ReadTimeout)
+	if err != nil {
+		return nil, err
+	}
+	writeTimeout, err := parse("http_server.write_timeout", w.HTTPServer.WriteTimeout)
+	if err != nil {
+		return nil, err
+	}
+	idleTimeout, err := parse("http_server.idle_timeout", w.HTTPServer.IdleTimeout)
+	if err != nil {
+		return nil, err
+	}
 	return &Config{
 		Application: w.Application,
+		HTTPServer: HTTPServerConfig{
+			Host: w.HTTPServer.Host, Port: w.HTTPServer.Port,
+			ReadHeaderTimeout: readHeaderTimeout, ReadTimeout: readTimeout,
+			WriteTimeout: writeTimeout, IdleTimeout: idleTimeout,
+		},
 		Scanner: ScannerConfig{HTTPTimeout: httpTimeout, TLSHandshakeTimeout: tlsTimeout,
 			MaxRedirects: w.Scanner.MaxRedirects, MaxConcurrentScans: w.Scanner.MaxConcurrentScans,
 			UserAgent: w.Scanner.UserAgent},
@@ -201,6 +275,9 @@ func LoadFromReader(reader io.Reader) (*Config, error) {
 
 // Validate checks values that affect safe application operation.
 func (c *Config) Validate() error {
+	if err := c.HTTPServer.Validate(); err != nil {
+		return err
+	}
 	if c.Scanner.HTTPTimeout <= 0 {
 		return fmt.Errorf("scanner.http_timeout must be positive")
 	}
@@ -229,6 +306,35 @@ func (c *Config) Validate() error {
 	case "debug", "info", "warn", "error":
 	default:
 		return fmt.Errorf("logging.level must be one of debug, info, warn, error")
+	}
+	return nil
+}
+
+// Validate checks HTTP server settings, including preventing wildcard binds.
+func (c HTTPServerConfig) Validate() error {
+	if strings.TrimSpace(c.Host) == "" {
+		return fmt.Errorf("http_server.host cannot be empty")
+	}
+	if ip := net.ParseIP(c.Host); ip != nil && ip.IsUnspecified() {
+		return fmt.Errorf("http_server.host cannot be an unspecified address")
+	}
+	if strings.EqualFold(c.Host, "0.0.0.0") || strings.EqualFold(c.Host, "::") {
+		return fmt.Errorf("http_server.host cannot be an unspecified address")
+	}
+	if c.Port < 1 || c.Port > 65535 {
+		return fmt.Errorf("http_server.port must be between 1 and 65535")
+	}
+	if c.ReadHeaderTimeout <= 0 {
+		return fmt.Errorf("http_server.read_header_timeout must be positive")
+	}
+	if c.ReadTimeout <= 0 {
+		return fmt.Errorf("http_server.read_timeout must be positive")
+	}
+	if c.WriteTimeout <= 0 {
+		return fmt.Errorf("http_server.write_timeout must be positive")
+	}
+	if c.IdleTimeout <= 0 {
+		return fmt.Errorf("http_server.idle_timeout must be positive")
 	}
 	return nil
 }

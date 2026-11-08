@@ -121,7 +121,7 @@ The current tree is the starting point. A directory containing only `.gitkeep` i
 | `internal/intel` | Threat-feed adapters, freshness, and source attribution. | Shared scan types; feed/client interfaces | Placeholder directory; planned |
 | `internal/score` | Converts findings into policy-versioned risk score and verdict. | Findings and scoring policy | Placeholder directory; planned |
 | `internal/storage` | Optional report/cache persistence. | Core report contract; storage driver boundary | Placeholder directory; planned |
-| `internal/tui` | Interactive presentation using the shared scanner interface and report. | Scanner/report contracts and future TUI libraries | Placeholder directory; planned |
+| `internal/tui` | Interactive presentation using the shared scanner interface and report. | Bubble Tea, Bubbles, Lipgloss, shared scan pipeline | Implemented (Phase 7): Interactive terminal UI |
 
 The `configs`, `docs`, `scripts`, and `tests` directories are repository areas rather than Go packages. At present, `configs` contains an example JSON file; `docs` contains this architecture document; `scripts` and `tests` contain placeholders. Unit tests currently live beside their Go packages.
 
@@ -358,3 +358,32 @@ Aggregation exposes coverage per URL, domain, TLS connection, certificate, CT, H
 `internal/report.RenderJSON` emits the versioned `bouclier-risk/v1` JSON assessment, including the policy version, findings, score, coverage, remediation, and limitations. `RenderMarkdown` presents the same completed assessment as an overview, severity summary, top factors, findings, coverage, limitations, and scoring methodology. The report layer never recalculates scores or verdicts. Both renderers sanitize URLs and secret-like values and operate on copies; no response bodies or authorization/cookie values are part of the aggregation contract. Markdown untrusted text is escaped before insertion.
 
 Known limitations: catalog mappings require maintenance as upstream finding codes evolve; unknown codes are deliberately unscored. The initial policy is a transparent baseline rather than empirically calibrated. Deduplication relies on stable codes and evidence emitted by source packages. Registration observations currently provide age context only. Risk and report packages are library APIs and are not wired to a CLI scan or export command.
+
+## Interactive Terminal UI (Phase 7)
+
+`internal/tui` provides a terminal user interface powered by Charmbracelet's Bubble Tea (`tea`), Bubbles, and Lipgloss. It connects to the existing `cli.ExecuteScanPipeline` scan orchestration without duplicating security analysis or introducing a second scanner.
+
+### Bubble Tea Architecture & Async Pipeline
+The Bubble Tea event loop remains strictly non-blocking:
+1. Scan execution runs in a background goroutine launched via `tui.StartScanCmd`.
+2. As each stage executes (URL Analysis, Domain Intelligence, TLS & Certificates, Certificate Transparency, HTTP Security, Risk Aggregation), typed `tui.ScanProgressMsg` events stream over a channel into the Bubble Tea update cycle.
+3. Cancellations (user pressing `C` or `Esc`) immediately cancel a `context.Context` passed to `ExecuteScanPipeline`, aborting in-flight network requests.
+4. Stale messages from canceled or prior scans are discarded by tracking a monotonic `ScanID`.
+5. Elapsed scan duration is updated via periodic `TickMsg` ticks without blocking the rendering cycle.
+
+### Screens & Navigation
+The interface is structured as an interactive state machine (`Screen` enum):
+- `ScreenDashboard`: Welcome banner, intelligence engine summary, and quick action prompts.
+- `ScreenURLInput`: Target URL input using Bubbles `textinput`, verifying schemes and SSRF boundaries.
+- `ScreenScanning`: Live stage progression checklist (`[✓]`, `[●]`, `[✗]`, `[-]`) with elapsed timer.
+- `ScreenOverview`: High-level assessment card (0–100 score, tier badge, severity counts, top factors, coverage status).
+- `ScreenFindings`: Filterable findings explorer (`All`, `Crit`, `High`, `Med`, `Low`, `Info`) with cursor selection.
+- `ScreenFindingDetail`: In-depth inspection view showing code, scoring group, evidence, description, and remediation.
+- `ScreenCoverage`: Comprehensive component coverage matrix, error reasons, and boundary limitation caveats.
+- `ScreenExport`: Format toggle (JSON or Markdown) and file path input, creating exports with restrictive `0600` permissions.
+- `ScreenHelp`: Contextual keyboard shortcut guide, methodology overview, and risk tier definitions.
+
+### Safety & Interactivity Boundaries
+- Interactivity is verified on launch using `isatty.IsTerminal`; non-interactive invocations return a clear error redirecting users to `bouclier scan <url>`.
+- The UI handles terminal resizes (`tea.WindowSizeMsg`) responsively, adapting cards and tables to terminal dimensions.
+- Monochrome mode (`--no-color` or `NO_COLOR`) disables ANSI color sequences while preserving layout and structure.

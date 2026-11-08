@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"bouclier/internal/certanalysis"
 	"bouclier/internal/heuristics"
 	"bouclier/internal/registration"
+	"bouclier/internal/tlsintel"
 	"bouclier/internal/webintel"
 )
 
@@ -69,5 +71,76 @@ func TestTargetQueryIsNotRetained(t *testing.T) {
 	data, _ := json.Marshal(got)
 	if strings.Contains(string(data), "topsecret") {
 		t.Fatal("sensitive query value leaked")
+	}
+}
+
+func TestAggregateWebEmbeddedTLS(t *testing.T) {
+	tlsRes := &tlsintel.AnalysisResult{
+		TargetHostname:    "example.com",
+		Findings:          []certanalysis.Finding{{Code: "CERT_HOSTNAME_MISMATCH", Title: "Mismatch", Evidence: "san mismatch"}},
+		TLSStatus:         tlsintel.ComponentStatus{State: tlsintel.StateCompleted},
+		CertificateStatus: tlsintel.ComponentStatus{State: tlsintel.StateCompleted},
+		CTStatus:          tlsintel.ComponentStatus{State: tlsintel.StateCompleted},
+	}
+	webRes := &webintel.AnalysisResult{
+		RequestedURL: "https://example.com/",
+		TLS:          tlsRes,
+		Findings:     []heuristics.Finding{{Code: "WEB_HSTS_MISSING", Title: "Missing HSTS", Evidence: "header missing"}},
+	}
+	got, err := AggregateDefault(AggregationInput{Web: webRes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Findings) != 2 {
+		t.Fatalf("expected 2 findings (1 from web, 1 from embedded TLS), got %d: %+v", len(got.Findings), got.Findings)
+	}
+	var hasTLS, hasWeb bool
+	for _, f := range got.Findings {
+		if f.Code == "CERT_HOSTNAME_MISMATCH" {
+			hasTLS = true
+		}
+		if f.Code == "WEB_HSTS_MISSING" {
+			hasWeb = true
+		}
+	}
+	if !hasTLS || !hasWeb {
+		t.Fatalf("expected both TLS and Web findings, got: %+v", got.Findings)
+	}
+}
+
+func TestAggregateCTOutageDoesNotAddRisk(t *testing.T) {
+	tlsRes := &tlsintel.AnalysisResult{
+		TargetHostname:    "example.com",
+		Findings:          []certanalysis.Finding{},
+		TLSStatus:         tlsintel.ComponentStatus{State: tlsintel.StateCompleted},
+		CertificateStatus: tlsintel.ComponentStatus{State: tlsintel.StateCompleted},
+		CTStatus:          tlsintel.ComponentStatus{State: tlsintel.StateFailed, Error: "connection timeout to CT log"},
+	}
+	got, err := AggregateDefault(AggregationInput{Target: "example.com", TLS: tlsRes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.OverallScore != 0 {
+		t.Fatalf("CT failure created artificial risk score: %d", got.OverallScore)
+	}
+	var ctCoverage *ComponentCoverage
+	for i := range got.AnalysisCoverage {
+		if got.AnalysisCoverage[i].Component == "ct_lookup" {
+			ctCoverage = &got.AnalysisCoverage[i]
+			break
+		}
+	}
+	if ctCoverage == nil || ctCoverage.State != ComponentFailed {
+		t.Fatalf("expected CT coverage to be failed, got: %+v", ctCoverage)
+	}
+	foundLimitation := false
+	for _, lim := range got.Limitations {
+		if strings.Contains(lim, "ct_lookup coverage is failed; absence of findings is not a clean result") {
+			foundLimitation = true
+			break
+		}
+	}
+	if !foundLimitation {
+		t.Fatalf("expected CT failure limitation, got: %+v", got.Limitations)
 	}
 }

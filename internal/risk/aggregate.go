@@ -49,8 +49,12 @@ func Aggregate(input AggregationInput, policy Policy) (*RiskAssessment, error) {
 			observations = append(observations, FromHeuristicFinding(f, SourceDomain))
 		}
 	}
-	if input.TLS != nil {
-		for _, f := range input.TLS.Findings {
+	tlsInput := input.TLS
+	if tlsInput == nil && input.Web != nil {
+		tlsInput = input.Web.TLS
+	}
+	if tlsInput != nil {
+		for _, f := range tlsInput.Findings {
 			observations = append(observations, Observation{Code: f.Code, Title: f.Title, Description: f.Description, Category: f.Category, Evidence: f.Evidence, Source: SourceTLS})
 		}
 	}
@@ -100,8 +104,12 @@ func inferTarget(input AggregationInput) string {
 	if input.Domain != nil && input.Domain.DomainInfo != nil && input.Domain.DomainInfo.Hostname != "" {
 		return input.Domain.DomainInfo.Hostname
 	}
-	if input.TLS != nil && input.TLS.TargetHostname != "" {
-		return input.TLS.TargetHostname
+	tlsInput := input.TLS
+	if tlsInput == nil && input.Web != nil {
+		tlsInput = input.Web.TLS
+	}
+	if tlsInput != nil && tlsInput.TargetHostname != "" {
+		return tlsInput.TargetHostname
 	}
 	if input.Web != nil {
 		for _, value := range []string{input.Web.RequestedURL, input.Web.FinalURL} {
@@ -118,8 +126,12 @@ func analysisTime(input AggregationInput) time.Time {
 		return input.AnalyzedAt.UTC()
 	}
 	var latest time.Time
-	if input.TLS != nil && input.TLS.AnalyzedAt.After(latest) {
-		latest = input.TLS.AnalyzedAt
+	tlsInput := input.TLS
+	if tlsInput == nil && input.Web != nil {
+		tlsInput = input.Web.TLS
+	}
+	if tlsInput != nil && tlsInput.AnalyzedAt.After(latest) {
+		latest = tlsInput.AnalyzedAt
 	}
 	if input.Web != nil && input.Web.AnalyzedAt.After(latest) {
 		latest = input.Web.AnalyzedAt

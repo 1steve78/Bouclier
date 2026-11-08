@@ -43,9 +43,9 @@ func RenderFindings(
 	width int,
 	maxVisible int,
 ) string {
-	contentWidth := width - 4
-	if contentWidth < 45 {
-		contentWidth = 45
+	contentWidth := width - 6
+	if contentWidth < 30 {
+		contentWidth = 30
 	}
 	if contentWidth > 90 {
 		contentWidth = 90
@@ -107,13 +107,23 @@ func RenderFindings(
 			title = title[:maxTitleLen-3] + "..."
 		}
 
-		line := fmt.Sprintf("%s%s  %s pts  %-22s  %s",
-			cursor,
-			badge,
-			styles.Bold.Render(impact),
-			styles.Muted.Render(f.Code),
-			title,
-		)
+		var line string
+		if contentWidth < 55 {
+			compactTitle := title
+			avail := contentWidth - 14
+			if avail > 5 && len(compactTitle) > avail {
+				compactTitle = compactTitle[:avail-3] + "..."
+			}
+			line = fmt.Sprintf("%s%s %s %s", cursor, badge, styles.Bold.Render(impact), compactTitle)
+		} else {
+			line = fmt.Sprintf("%s%s  %s pts  %-22s  %s",
+				cursor,
+				badge,
+				styles.Bold.Render(impact),
+				styles.Muted.Render(f.Code),
+				title,
+			)
+		}
 
 		if isCursor {
 			list.WriteString(styles.SelectedRow.Width(contentWidth - 2).Render(line))

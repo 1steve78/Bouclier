@@ -10,7 +10,8 @@
     "read_header_timeout": "5s",
     "read_timeout": "15s",
     "write_timeout": "30s",
-    "idle_timeout": "60s"
+    "idle_timeout": "60s",
+    "max_scan_duration": "20s"
   },
   "scanner": {
     "http_timeout": "8s",
@@ -18,6 +19,15 @@
     "max_redirects": 5,
     "max_concurrent_scans": 10,
     "user_agent": "Bouclier/0.1.0-dev"
+  },
+  "ai": {
+    "enabled": false,
+    "ollama": {
+      "base_url": "http://127.0.0.1:11434",
+      "model": "llama3.2"
+    },
+    "timeout": "90s",
+    "max_tokens": 512
   },
   "storage": {
     "database_path": "~/.bouclier/bouclier.db",

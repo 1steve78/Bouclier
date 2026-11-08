@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"bouclier/internal/config"
 	"bouclier/internal/heuristics"
 )
 
@@ -58,7 +59,10 @@ func testWebClient(t *testing.T, handler http.Handler, options ClientOptions) (*
 	server := httptest.NewServer(handler)
 	resolver := &fixedResolver{addresses: []netip.Addr{netip.MustParseAddr("8.8.8.8")}}
 	dialer := &net.Dialer{}
-	client, err := newClient(options, resolver, func(ctx context.Context, network, _ string) (net.Conn, error) {
+	client, err := newClient(options, resolver, func(ctx context.Context, network, address string) (net.Conn, error) {
+		if address != "8.8.8.8:80" {
+			return nil, errors.New("unexpected pinned destination")
+		}
 		return dialer.DialContext(ctx, network, strings.TrimPrefix(server.URL, "http://"))
 	})
 	if err != nil {
@@ -109,6 +113,9 @@ func TestClientPinsValidatedIPAndSanitizesResponse(t *testing.T) {
 	client, _, resolver := testWebClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.Header.Get("Cookie") != "" || r.Header.Get("Authorization") != "" {
 			t.Errorf("unexpected request: %s %#v", r.Method, r.Header)
+		}
+		if r.Host != "example.com" {
+			t.Errorf("HTTP Host = %q, want original hostname", r.Host)
 		}
 		if r.Header.Get("User-Agent") != "test-agent" {
 			t.Errorf("user-agent = %q", r.Header.Get("User-Agent"))
@@ -199,7 +206,9 @@ func TestClientRevalidatesRedirectDNSBeforeRequest(t *testing.T) {
 	defer server.Close()
 	resolver := &sequenceResolver{answers: [][]netip.Addr{{netip.MustParseAddr("8.8.8.8")}, {netip.MustParseAddr("8.8.4.4"), netip.MustParseAddr("10.0.0.1")}}}
 	dialer := &net.Dialer{}
+	var dialed []string
 	client, err := newClient(ClientOptions{}, resolver, func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialed = append(dialed, address)
 		if address != "8.8.8.8:80" {
 			return nil, errors.New("unexpected destination")
 		}
@@ -211,6 +220,87 @@ func TestClientRevalidatesRedirectDNSBeforeRequest(t *testing.T) {
 	result, err := client.Inspect(context.Background(), normalized(t, "http://example.com"))
 	if err == nil || result == nil || requests.Load() != 1 || resolver.calls.Load() != 2 {
 		t.Fatalf("redirect was not rejected safely: result=%+v err=%v requests=%d lookups=%d", result, err, requests.Load(), resolver.calls.Load())
+	}
+	if len(dialed) != 1 || dialed[0] != "8.8.8.8:80" {
+		t.Fatalf("redirect dial destinations = %v, want only the initial validated address", dialed)
+	}
+}
+
+func TestClientRejectsDNSRebindingOnSubsequentInspection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+	resolver := &sequenceResolver{answers: [][]netip.Addr{
+		{netip.MustParseAddr("8.8.8.8")},
+		{netip.MustParseAddr("127.0.0.1")},
+	}}
+	dialer := &net.Dialer{}
+	var dialed []string
+	client, err := newClient(ClientOptions{}, resolver, func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialed = append(dialed, address)
+		if address != "8.8.8.8:80" {
+			return nil, errors.New("attempted to dial an unvalidated destination")
+		}
+		return dialer.DialContext(ctx, network, strings.TrimPrefix(server.URL, "http://"))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Inspect(context.Background(), normalized(t, "http://target.com")); err != nil {
+		t.Fatalf("initial public destination inspection failed: %v", err)
+	}
+	result, err := client.Inspect(context.Background(), normalized(t, "http://target.com"))
+	if !errors.Is(err, ErrUnsafeTarget) || result == nil {
+		t.Fatalf("rebinding inspection result=%+v err=%v; want prohibited DNS answer rejection", result, err)
+	}
+	if resolver.calls.Load() != 2 || len(dialed) != 1 || dialed[0] != "8.8.8.8:80" {
+		t.Fatalf("lookups=%d dial destinations=%v; want two lookups and only the initial public dial", resolver.calls.Load(), dialed)
+	}
+}
+
+func TestClientRejectsUnsupportedRedirectLimits(t *testing.T) {
+	for _, redirects := range []int{0, config.MaxRedirectsLimit} {
+		if _, err := newClient(ClientOptions{MaxRedirects: redirects}, &fixedResolver{}, unusedWebDial); err != nil {
+			t.Errorf("newClient rejected max redirects %d: %v", redirects, err)
+		}
+	}
+	for _, redirects := range []int{-1, config.MaxRedirectsLimit + 1} {
+		if _, err := newClient(ClientOptions{MaxRedirects: redirects}, &fixedResolver{}, unusedWebDial); err == nil {
+			t.Errorf("newClient accepted max redirects %d", redirects)
+		}
+	}
+}
+
+func unusedWebDial(context.Context, string, string) (net.Conn, error) {
+	return nil, errors.New("unexpected dial")
+}
+
+func TestClientRejectsLoopbackRedirectBeforeDial(t *testing.T) {
+	var dials atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://127.0.0.1/private", http.StatusFound)
+	}))
+	defer server.Close()
+	resolver := &fixedResolver{addresses: []netip.Addr{netip.MustParseAddr("8.8.8.8")}}
+	dialer := &net.Dialer{}
+	client, err := newClient(ClientOptions{}, resolver, func(ctx context.Context, network, address string) (net.Conn, error) {
+		dials.Add(1)
+		if address != "8.8.8.8:80" {
+			return nil, errors.New("attempted to dial an unvalidated destination")
+		}
+		return dialer.DialContext(ctx, network, strings.TrimPrefix(server.URL, "http://"))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Inspect(context.Background(), normalized(t, "http://example.com"))
+	if !errors.Is(err, ErrUnsafeTarget) {
+		t.Fatalf("loopback redirect error = %v, want ErrUnsafeTarget", err)
+	}
+	if got := dials.Load(); got != 1 {
+		t.Fatalf("dial calls = %d, want only the initial validated destination", got)
 	}
 }
 
@@ -224,6 +314,7 @@ func TestClientRejectsUnsafeAddressesAndPorts(t *testing.T) {
 		{"mapped loopback", []netip.Addr{netip.MustParseAddr("::ffff:127.0.0.1")}, "http://example.com"},
 		{"mixed resolution", []netip.Addr{netip.MustParseAddr("8.8.8.8"), netip.MustParseAddr("10.0.0.2")}, "http://example.com"},
 		{"shared address space", []netip.Addr{netip.MustParseAddr("100.64.0.1")}, "http://example.com"},
+		{"hex-like IPv4 hostname resolving to loopback", []netip.Addr{netip.MustParseAddr("127.0.0.1")}, "http://0x7f.0.0.1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resolver := &fixedResolver{addresses: tc.addresses}
@@ -236,7 +327,7 @@ func TestClientRejectsUnsafeAddressesAndPorts(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = client.Inspect(context.Background(), normalized(t, tc.raw))
-			if err == nil || dialCalled {
+			if !errors.Is(err, ErrUnsafeTarget) || dialCalled {
 				t.Fatalf("unsafe destination accepted or dialed: %v", err)
 			}
 		})
@@ -255,7 +346,14 @@ func TestClientRejectsUnsafeAddressesAndPorts(t *testing.T) {
 }
 
 func TestAllowedWebAddressRejectsSpecialUseRanges(t *testing.T) {
-	for _, raw := range []string{"0.1.2.3", "10.0.0.1", "127.0.0.1", "169.254.1.1", "172.16.0.1", "192.168.1.1", "224.0.0.1", "240.0.0.1", "::", "::1", "fc00::1", "fe80::1", "ff02::1", "::ffff:10.0.0.1", "100.64.0.1", "2001:db8::1"} {
+	for _, raw := range []string{
+		"0.1.2.3", "10.0.0.1", "127.0.0.1", "169.254.1.1", "169.254.169.254",
+		"172.16.0.1", "192.0.0.1", "192.0.2.1", "192.168.1.1", "198.18.0.1",
+		"198.51.100.1", "203.0.113.1", "224.0.0.1", "240.0.0.1", "100.64.0.1",
+		"100.100.100.200", "::", "::1", "::8.8.8.8", "fc00::1", "fe80::1", "ff02::1",
+		"::ffff:10.0.0.1", "64:ff9b::808:808", "100::1", "2001::1", "2001:db8::1",
+		"2002:0808:0808::1", "3fff::1",
+	} {
 		t.Run(raw, func(t *testing.T) {
 			addr := netip.MustParseAddr(raw)
 			if allowedWebAddress(addr) {
@@ -343,19 +441,27 @@ func TestClientTimeout(t *testing.T) {
 
 func TestClientHTTPSPreservesHostIdentity(t *testing.T) {
 	pair, cert := makeTLSPair(t)
+	sni := make(chan string, 1)
+	host := make(chan string, 1)
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Host != "example.com" {
-			t.Errorf("Host = %q", r.Host)
-		}
+		host <- r.Host
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write([]byte("ok"))
 	}))
-	server.TLS = &tls.Config{Certificates: []tls.Certificate{pair}}
+	server.TLS = &tls.Config{
+		Certificates: []tls.Certificate{pair},
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			sni <- hello.ServerName
+			return nil, nil
+		},
+	}
 	server.StartTLS()
 	defer server.Close()
 	resolver := &fixedResolver{addresses: []netip.Addr{netip.MustParseAddr("8.8.8.8")}}
 	localDialer := &net.Dialer{}
-	client, err := newClient(ClientOptions{}, resolver, func(ctx context.Context, network, _ string) (net.Conn, error) {
+	dialed := make(chan string, 1)
+	client, err := newClient(ClientOptions{}, resolver, func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialed <- address
 		return localDialer.DialContext(ctx, network, strings.TrimPrefix(server.URL, "https://"))
 	})
 	if err != nil {
@@ -366,6 +472,15 @@ func TestClientHTTPSPreservesHostIdentity(t *testing.T) {
 	result, err := client.Inspect(context.Background(), normalized(t, "https://example.com"))
 	if err != nil || !result.FinalHTTPS {
 		t.Fatalf("HTTPS inspection result=%+v err=%v", result, err)
+	}
+	if got := <-dialed; got != "8.8.8.8:443" {
+		t.Fatalf("HTTPS dial destination = %q, want validated IP and port", got)
+	}
+	if got := <-sni; got != "example.com" {
+		t.Fatalf("TLS SNI = %q, want original hostname", got)
+	}
+	if got := <-host; got != "example.com" {
+		t.Fatalf("HTTP Host = %q, want original hostname", got)
 	}
 }
 

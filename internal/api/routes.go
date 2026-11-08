@@ -8,7 +8,7 @@ import (
 	"bouclier/internal/api/middleware"
 )
 
-func registerRoutes(mux *http.ServeMux) {
+func registerRoutes(mux *http.ServeMux, scanHandler ...http.Handler) {
 	registerGET(mux, "/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, contract.HealthResponse{Status: "ok", Service: "bouclier-api"})
 	})
@@ -18,6 +18,9 @@ func registerRoutes(mux *http.ServeMux) {
 	registerGET(mux, "/api/v1", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, contract.MetadataResponse{Name: "Bouclier API", Version: "v1"})
 	})
+	if len(scanHandler) > 0 && scanHandler[0] != nil {
+		mux.Handle("/api/v1/scans", scanHandler[0])
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		middleware.WriteJSONError(w, http.StatusNotFound, contract.ErrorCodeNotFound, "The requested resource was not found.")
 	})

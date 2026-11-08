@@ -30,6 +30,7 @@ func DefaultPolicy() Policy {
 			"domain-structure": 14, "certificate-identity": 45, "certificate-validity": 45, "certificate-trust": 45,
 			"web-transport": 35, "web-navigation": 8, "web-content-policy": 15, "web-privacy": 10, "web-cookie": 22,
 			"web-cors": 16, "web-html-mixed-content": 20, "web-html-link": 5, "web-html-form": 35, "web-html": 5,
+			"threat-intelligence": 60,
 		},
 	}
 }

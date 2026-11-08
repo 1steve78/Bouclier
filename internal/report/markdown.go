@@ -114,6 +114,28 @@ func RenderMarkdown(assessment *risk.RiskAssessment) (string, error) {
 		}
 		out.WriteString("\n")
 	}
+	if a.Intelligence != nil {
+		out.WriteString("## Threat intelligence\n\n")
+		syncTime := "never"
+		if a.Intelligence.LastSuccessfulSync != nil {
+			syncTime = formatTime(*a.Intelligence.LastSuccessfulSync)
+		}
+		out.WriteString(fmt.Sprintf("- **Sources configured/enabled:** %d / %d\n", a.Intelligence.SourcesConfigured, a.Intelligence.SourcesEnabled))
+		out.WriteString(fmt.Sprintf("- **Indicators evaluated:** %d\n", a.Intelligence.IndicatorsConsidered))
+		out.WriteString(fmt.Sprintf("- **Matches identified:** %d\n", a.Intelligence.MatchesCount))
+		out.WriteString(fmt.Sprintf("- **Last successful synchronization:** %s\n", syncTime))
+		if a.Intelligence.DatabaseStale {
+			out.WriteString("- **Database status:** Stale (feeds have not been updated recently)\n")
+		} else if a.Intelligence.DatabaseUnavailable {
+			out.WriteString("- **Database status:** Unavailable\n")
+		} else {
+			out.WriteString("- **Database status:** Active\n")
+		}
+		if a.Intelligence.Detail != "" {
+			out.WriteString(fmt.Sprintf("- **Detail:** %s\n", markdownEscape(a.Intelligence.Detail)))
+		}
+		out.WriteString("\n")
+	}
 	out.WriteString("## Limitations and unavailable checks\n\n")
 	if len(a.Limitations) == 0 {
 		out.WriteString("No additional limitations were supplied. Skipped and unavailable components are shown in the coverage section.\n\n")

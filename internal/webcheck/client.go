@@ -27,6 +27,7 @@ const (
 )
 
 var (
+	ErrUnsafeTarget     = errors.New("destination is not permitted")
 	headerURLPattern    = regexp.MustCompile(`(?i)https?://[^\s"'<>]+`)
 	headerSecretPattern = regexp.MustCompile(`(?i)\b(password|token|secret|api[_-]?key|access[_-]?key)=([^&;\s,]+)`)
 )
@@ -79,8 +80,8 @@ func newClient(options ClientOptions, resolver ipResolver, dial tcpDialer) (*Cli
 	} else if options.MaxRedirects == 0 {
 		options.MaxRedirects = defaultRedirects
 	}
-	if options.MaxRedirects < 0 || options.MaxRedirects > 20 {
-		return nil, fmt.Errorf("create web client: maximum redirects must be between 0 and 20")
+	if options.MaxRedirects < 0 || options.MaxRedirects > config.MaxRedirectsLimit {
+		return nil, fmt.Errorf("create web client: maximum redirects must be between 0 and %d", config.MaxRedirectsLimit)
 	}
 	if options.UserAgent == "" {
 		options.UserAgent = "Bouclier/0.1.0-dev"
@@ -105,20 +106,10 @@ func (c *Client) Inspect(ctx context.Context, input *heuristics.NormalizedURL) (
 	if c == nil || ctx == nil {
 		return nil, fmt.Errorf("inspect website: client and context are required")
 	}
-	if input == nil {
-		return nil, fmt.Errorf("inspect website: normalized URL is nil")
+	if err := ValidateTarget(input); err != nil {
+		return nil, fmt.Errorf("inspect website: %w", err)
 	}
-	parsed, err := url.Parse(input.Normalized)
-	if err != nil || parsed == nil || parsed.Hostname() == "" {
-		return nil, fmt.Errorf("inspect website: normalized URL is invalid")
-	}
-	validated, err := heuristics.NormalizeURL(input.Normalized)
-	if err != nil || validated.Hostname != input.Hostname || validated.Scheme != input.Scheme || validated.Port != input.Port {
-		return nil, fmt.Errorf("inspect website: normalized URL is inconsistent or invalid")
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, fmt.Errorf("inspect website: unsupported scheme")
-	}
+	parsed, _ := url.Parse(input.Normalized)
 	if parsed.User != nil {
 		// Never attach userinfo to a request, including a caller-constructed value.
 		parsed.User = nil
@@ -127,10 +118,6 @@ func (c *Client) Inspect(ctx context.Context, input *heuristics.NormalizedURL) (
 		parsed.Fragment = ""
 		parsed.RawFragment = ""
 	}
-	if err := validateWebPort(parsed); err != nil {
-		return nil, err
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, c.options.Timeout)
 	defer cancel()
 	started := time.Now()
@@ -188,7 +175,7 @@ func (c *Client) Inspect(ctx context.Context, input *heuristics.NormalizedURL) (
 			destination.Fragment = ""
 			destination.RawFragment = ""
 			if destination.Scheme != "http" && destination.Scheme != "https" {
-				return result, fmt.Errorf("inspect website: redirect uses unsupported scheme")
+				return result, fmt.Errorf("inspect website: redirect uses unsupported scheme: %w", ErrUnsafeTarget)
 			}
 			normalizedDestination, normalizeErr := heuristics.NormalizeURL(destination.String())
 			if normalizeErr != nil {
@@ -248,6 +235,45 @@ func (c *Client) Inspect(ctx context.Context, input *heuristics.NormalizedURL) (
 	}
 }
 
+// ValidateTarget performs static target checks without DNS resolution or network
+// access. The destination is still resolved, validated, and pinned at dial time.
+func ValidateTarget(input *heuristics.NormalizedURL) error {
+	if input == nil {
+		return fmt.Errorf("normalized URL is nil")
+	}
+	parsed, err := url.Parse(input.Normalized)
+	if err != nil || parsed == nil || parsed.Hostname() == "" {
+		return fmt.Errorf("normalized URL is invalid")
+	}
+	validated, err := heuristics.NormalizeURL(input.Normalized)
+	if err != nil || validated.Hostname != input.Hostname || validated.Scheme != input.Scheme || validated.Port != input.Port {
+		return fmt.Errorf("normalized URL is inconsistent or invalid")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("unsupported scheme")
+	}
+	if err := validateWebPort(parsed); err != nil {
+		return err
+	}
+	host := strings.TrimSuffix(parsed.Hostname(), ".")
+	if host == "" || strings.Contains(host, "%") {
+		return fmt.Errorf("hostname is invalid or contains a zone identifier")
+	}
+	if address, parseErr := netip.ParseAddr(host); parseErr == nil {
+		if !allowedWebAddress(address.Unmap()) {
+			return fmt.Errorf("%w: destination address is not public", ErrUnsafeTarget)
+		}
+		return nil
+	}
+	if strings.Contains(host, ":") || !strings.Contains(host, ".") {
+		return fmt.Errorf("IP literal or single-label hostname is invalid")
+	}
+	if isLocalWebHostname(strings.ToLower(host)) {
+		return fmt.Errorf("%w: local or internal hostname is not permitted", ErrUnsafeTarget)
+	}
+	return nil
+}
+
 func (c *Client) transport(host, port string, addresses []netip.Addr) *http.Transport {
 	return &http.Transport{
 		Proxy:                  nil,
@@ -295,7 +321,7 @@ func (c *Client) resolveAndValidate(ctx context.Context, target *url.URL) ([]net
 	if addr, err := netip.ParseAddr(host); err == nil {
 		addr = addr.Unmap()
 		if !allowedWebAddress(addr) {
-			return nil, "", "", fmt.Errorf("destination address is not public")
+			return nil, "", "", fmt.Errorf("%w: destination address is not public", ErrUnsafeTarget)
 		}
 		return []netip.Addr{addr}, host, port, nil
 	}
@@ -303,7 +329,7 @@ func (c *Client) resolveAndValidate(ctx context.Context, target *url.URL) ([]net
 		return nil, "", "", fmt.Errorf("IP literal or single-label hostname is invalid")
 	}
 	if isLocalWebHostname(strings.ToLower(host)) {
-		return nil, "", "", fmt.Errorf("local or internal hostname is not permitted")
+		return nil, "", "", fmt.Errorf("%w: local or internal hostname is not permitted", ErrUnsafeTarget)
 	}
 	addresses, err := c.resolver.LookupNetIP(ctx, "ip", host)
 	if err != nil {
@@ -315,11 +341,11 @@ func (c *Client) resolveAndValidate(ctx context.Context, target *url.URL) ([]net
 	unique := make([]netip.Addr, 0, len(addresses))
 	for _, addr := range addresses {
 		if !addr.IsValid() || addr.Zone() != "" {
-			return nil, "", "", fmt.Errorf("DNS returned an invalid or scoped address")
+			return nil, "", "", fmt.Errorf("%w: DNS returned an invalid or scoped address", ErrUnsafeTarget)
 		}
 		addr = addr.Unmap()
 		if !allowedWebAddress(addr) {
-			return nil, "", "", fmt.Errorf("DNS returned a prohibited address")
+			return nil, "", "", fmt.Errorf("%w: DNS returned a prohibited address", ErrUnsafeTarget)
 		}
 		duplicate := false
 		for _, existing := range unique {
@@ -348,7 +374,7 @@ func allowedWebAddress(addr netip.Addr) bool {
 	if !addr.IsValid() || addr.Zone() != "" || !addr.IsGlobalUnicast() || addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified() {
 		return false
 	}
-	for _, raw := range []string{"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "64:ff9b::/96", "64:ff9b:1::/48", "100::/64", "2001::/23", "2001:db8::/32", "2002::/16", "3fff::/20"} {
+	for _, raw := range []string{"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "::/96", "64:ff9b::/96", "64:ff9b:1::/48", "100::/64", "2001::/23", "2001:db8::/32", "2002::/16", "3fff::/20"} {
 		if prefix, err := netip.ParsePrefix(raw); err == nil && prefix.Contains(addr) {
 			return false
 		}
@@ -363,7 +389,7 @@ func validateWebPort(target *url.URL) error {
 	}
 	value, err := strconv.Atoi(port)
 	if err != nil || value < 1 || value > 65535 || value != 80 && value != 443 {
-		return fmt.Errorf("destination port must be 80 or 443")
+		return fmt.Errorf("%w: destination port must be 80 or 443", ErrUnsafeTarget)
 	}
 	return nil
 }

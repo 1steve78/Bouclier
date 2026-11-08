@@ -6,10 +6,39 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"regexp"
 	"strings"
 
 	"bouclier/internal/config"
 )
+
+var (
+	sensitiveKeyPattern = regexp.MustCompile(`(?i)\b(password|token|secret|api[_-]?key|access[_-]?key|auth(?:orization)?|cookie)\b`)
+	logSecretPattern    = regexp.MustCompile(`(?i)\b(session(?:id)?|sid|auth(?:orization)?|jwt|token|password|secret|api[_-]?key|access[_-]?key)\s*[:=]\s*([^&;\s,]+)`)
+	logBearerPattern    = regexp.MustCompile(`(?i)(bearer\s+)[a-zA-Z0-9_\-\.]+`)
+	logURLPattern       = regexp.MustCompile(`(?i)https?://[^\s"'<>]+`)
+)
+
+func redactLogAttr(groups []string, a slog.Attr) slog.Attr {
+	if sensitiveKeyPattern.MatchString(a.Key) {
+		return slog.String(a.Key, "[redacted]")
+	}
+	if a.Value.Kind() == slog.KindString {
+		val := a.Value.String()
+		val = logBearerPattern.ReplaceAllString(val, "$1[redacted]")
+		val = logSecretPattern.ReplaceAllString(val, "$1=[redacted]")
+		val = logURLPattern.ReplaceAllStringFunc(val, func(raw string) string {
+			if at := strings.LastIndex(raw, "@"); at >= 0 {
+				if scheme := strings.Index(raw, "://"); scheme >= 0 && at > scheme+2 {
+					raw = raw[:scheme+3] + raw[at+1:]
+				}
+			}
+			return raw
+		})
+		return slog.String(a.Key, val)
+	}
+	return a
+}
 
 type loggerContextKey struct{}
 
@@ -32,7 +61,10 @@ func New(cfg config.LoggingConfig, writer io.Writer) (*slog.Logger, error) {
 		writer = os.Stderr
 	}
 
-	options := &slog.HandlerOptions{Level: level}
+	options := &slog.HandlerOptions{
+		Level:       level,
+		ReplaceAttr: redactLogAttr,
+	}
 	var handler slog.Handler
 	if cfg.Structured {
 		handler = slog.NewJSONHandler(writer, options)

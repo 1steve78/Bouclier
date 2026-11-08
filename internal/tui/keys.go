@@ -13,6 +13,10 @@ type KeyMap struct {
 	NewScan      key.Binding
 	ViewFindings key.Binding
 	ViewCoverage key.Binding
+	History      key.Binding
+	Intel        key.Binding
+	ExplainAI    key.Binding
+	Delete       key.Binding
 	Export       key.Binding
 	Up           key.Binding
 	Down         key.Binding
@@ -68,6 +72,22 @@ func DefaultKeyMap() KeyMap {
 		ViewCoverage: key.NewBinding(
 			key.WithKeys("c"),
 			key.WithHelp("c", "coverage"),
+		),
+		History: key.NewBinding(
+			key.WithKeys("h"),
+			key.WithHelp("h", "history"),
+		),
+		Intel: key.NewBinding(
+			key.WithKeys("i"),
+			key.WithHelp("i", "threat intel"),
+		),
+		ExplainAI: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "choose Ollama model"),
+		),
+		Delete: key.NewBinding(
+			key.WithKeys("d", "x"),
+			key.WithHelp("d", "delete"),
 		),
 		Export: key.NewBinding(
 			key.WithKeys("e"),

@@ -6,6 +6,7 @@ import (
 
 	"bouclier/internal/cli"
 	"bouclier/internal/config"
+	"bouclier/internal/storage"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -25,10 +26,11 @@ func SetScanRunnerForTesting(fn scanRunnerFunc) func() {
 
 // StartScanCmd creates a background goroutine to execute the scan pipeline asynchronously.
 // It returns a tea.Cmd that listens for progress messages from the scan channel.
-func StartScanCmd(scanID uint64, ctx context.Context, cfg *config.Config, target string, msgChan chan tea.Msg) tea.Cmd {
+func StartScanCmd(scanID uint64, ctx context.Context, cfg *config.Config, repo storage.Repository, target string, msgChan chan tea.Msg) tea.Cmd {
 	go func() {
 		opts := cli.ScanOptions{
-			Target: target,
+			Target:  target,
+			Storage: repo,
 		}
 
 		onProgress := func(stage cli.ScanStage, state cli.StageState, message string) {
@@ -59,6 +61,7 @@ func StartScanCmd(scanID uint64, ctx context.Context, cfg *config.Config, target
 		case msgChan <- ScanCompletedMsg{
 			ScanID:        scanID,
 			Assessment:    res.Assessment,
+			ScanRecord:    res.ScanRecord,
 			IsSSRFBlocked: res.IsSSRFBlocked,
 			Err:           nil,
 		}:

@@ -15,9 +15,9 @@ func RenderFindingDetail(
 	totalFindings int,
 	width int,
 ) string {
-	contentWidth := width - 4
-	if contentWidth < 45 {
-		contentWidth = 45
+	contentWidth := width - 6
+	if contentWidth < 30 {
+		contentWidth = 30
 	}
 	if contentWidth > 86 {
 		contentWidth = 86

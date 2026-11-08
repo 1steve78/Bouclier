@@ -7,9 +7,9 @@ import (
 
 // RenderHelp renders the interactive help, keyboard shortcuts, and scoring guide.
 func RenderHelp(styles Styles, width int) string {
-	contentWidth := width - 4
-	if contentWidth < 45 {
-		contentWidth = 45
+	contentWidth := width - 6
+	if contentWidth < 30 {
+		contentWidth = 30
 	}
 	if contentWidth > 86 {
 		contentWidth = 86
@@ -33,6 +33,7 @@ func RenderHelp(styles Styles, width int) string {
 		{"c", "Cancel scan while running / view coverage from overview"},
 		{"f", "View findings list from overview"},
 		{"e", "Export report to JSON or Markdown"},
+		{"a", "Choose an installed Ollama model and explain the assessment"},
 		{"n / s", "Initiate a new scan"},
 		{"ctrl+c", "Safe force exit"},
 	}

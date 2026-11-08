@@ -3,6 +3,7 @@ package ct
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -100,7 +101,18 @@ func newCTLogsDevProvider(options CTLogsDevOptions, base string) (*CTLogsDevProv
 	}
 	baseClient := options.HTTPClient
 	if baseClient == nil {
-		baseClient = http.DefaultClient
+		baseClient = &http.Client{
+			Transport: &http.Transport{
+				Proxy:                  nil, // Prevent inheriting environment proxy bypasses
+				DisableKeepAlives:      true,
+				TLSHandshakeTimeout:    5 * time.Second,
+				ResponseHeaderTimeout:  options.RequestTimeout,
+				MaxResponseHeaderBytes: 1 << 20,
+				TLSClientConfig: &tls.Config{
+					MinVersion: tls.VersionTLS12,
+				},
+			},
+		}
 	}
 	clientCopy := *baseClient
 	client := &clientCopy

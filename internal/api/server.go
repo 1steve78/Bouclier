@@ -18,6 +18,15 @@ const shutdownTimeout = 10 * time.Second
 
 // NewServer constructs the HTTP server and registers the initial API routes.
 func NewServer(cfg config.HTTPServerConfig, logger *slog.Logger) (*http.Server, error) {
+	return newServer(cfg, logger, nil, 0)
+}
+
+// NewServerWithScanService constructs the HTTP server with a bounded scan endpoint.
+func NewServerWithScanService(cfg config.HTTPServerConfig, logger *slog.Logger, service ScanService, maxConcurrentScans int) (*http.Server, error) {
+	return newServer(cfg, logger, service, maxConcurrentScans)
+}
+
+func newServer(cfg config.HTTPServerConfig, logger *slog.Logger, service ScanService, maxConcurrentScans int) (*http.Server, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid HTTP server configuration: %w", err)
 	}
@@ -26,7 +35,15 @@ func NewServer(cfg config.HTTPServerConfig, logger *slog.Logger) (*http.Server, 
 	}
 
 	mux := http.NewServeMux()
-	registerRoutes(mux)
+	var scanHandler http.Handler
+	if service != nil {
+		var err error
+		scanHandler, err = NewScanHandler(service, cfg.MaxScanDuration, maxConcurrentScans, logger)
+		if err != nil {
+			return nil, fmt.Errorf("configure scan endpoint: %w", err)
+		}
+	}
+	registerRoutes(mux, scanHandler)
 	handler := middleware.Recovery(logger)(
 		middleware.SecurityHeaders()(
 			middleware.Logging(logger)(
@@ -53,6 +70,10 @@ func Serve(ctx context.Context, server *http.Server, listener net.Listener, logg
 	}
 	if listener == nil {
 		return errors.New("HTTP server listener cannot be nil")
+	}
+	address, ok := listener.Addr().(*net.TCPAddr)
+	if !ok || !address.IP.IsLoopback() {
+		return errors.New("HTTP server listener must be bound to a loopback TCP address")
 	}
 	if logger == nil {
 		logger = slog.Default()

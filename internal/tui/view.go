@@ -16,7 +16,21 @@ func (m Model) View() string {
 
 	switch m.CurrentScreen {
 	case ScreenDashboard:
-		content = RenderDashboard(m.Styles, m.Width, m.Assessment)
+		content = RenderDashboard(m.Styles, m.Width, m.Assessment, m.RecentScans, m.StorageErr)
+
+	case ScreenHistory:
+		content = RenderHistory(
+			m.Styles,
+			m.HistoryRecords,
+			m.HistorySelectedIdx,
+			m.HistoryTotal,
+			m.HistoryPage,
+			m.HistoryPageSize,
+			m.HistoryDeleteConfirm,
+			m.HistoryDeleteID,
+			m.HistoryStatusMsg,
+			m.Width,
+		)
 
 	case ScreenURLInput:
 		content = RenderURLInput(m.Styles, m.URLInput, m.URLValidationErr, m.Width)
@@ -34,7 +48,13 @@ func (m Model) View() string {
 		)
 
 	case ScreenOverview:
-		content = RenderOverview(m.Styles, m.Assessment, m.Width)
+		content = RenderOverview(m.Styles, m.Assessment, m.Width, AIExplanationState{
+			Enabled: m.Config != nil && m.Config.AI.Enabled,
+			Loading: m.AIExplaining,
+			Text:    m.AIExplanationText,
+			Model:   m.AIExplanationModel,
+			Err:     m.AIExplanationErr,
+		})
 
 	case ScreenFindings:
 		maxVisible := m.Height - 14
@@ -89,8 +109,14 @@ func (m Model) View() string {
 	case ScreenHelp:
 		content = RenderHelp(m.Styles, m.Width)
 
+	case ScreenIntel:
+		content = RenderIntel(m)
+
+	case ScreenAIModelSelect:
+		content = RenderAIModelSelect(m)
+
 	default:
-		content = RenderDashboard(m.Styles, m.Width, m.Assessment)
+		content = RenderDashboard(m.Styles, m.Width, m.Assessment, m.RecentScans, m.StorageErr)
 	}
 
 	// Ensure padding and consistent newline

@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/netip"
+	"os"
 	"strings"
 	"time"
 
@@ -11,10 +13,13 @@ import (
 	"bouclier/internal/ct"
 	"bouclier/internal/domain"
 	"bouclier/internal/heuristics"
+	"bouclier/internal/intel"
 	"bouclier/internal/logging"
 	"bouclier/internal/risk"
+	"bouclier/internal/storage"
 	"bouclier/internal/tlsintel"
 	"bouclier/internal/webintel"
+	"github.com/google/uuid"
 )
 
 type ScanOptions struct {
@@ -29,6 +34,9 @@ type ScanOptions struct {
 	Quiet      bool
 	NoColor    bool
 	FailOnRisk *int // nil if not set, otherwise pointer to 0-100
+	Storage    storage.Repository
+	NoPersist  bool
+	ScanID     string
 }
 
 // websiteAnalyzer is the function used to run website intelligence.
@@ -93,6 +101,7 @@ const (
 	StageTLSAndCertificates      ScanStage = "TLS & Certificates"
 	StageCertificateTransparency ScanStage = "Certificate Transparency"
 	StageHTTPSecurity            ScanStage = "HTTP Security"
+	StageThreatIntelligence      ScanStage = "Threat Intelligence"
 	StageRiskAggregation         ScanStage = "Risk Aggregation"
 )
 
@@ -111,9 +120,13 @@ type ScanProgressFunc func(stage ScanStage, state StageState, message string)
 
 type ScanPipelineResult struct {
 	Assessment    *risk.RiskAssessment
+	ScanRecord    *storage.ScanRecord
 	IsSSRFBlocked bool
 	NormalizedURL *heuristics.NormalizedURL
 	WebResult     *webintel.AnalysisResult
+	StartedAt     time.Time
+	CompletedAt   time.Time
+	Duration      time.Duration
 }
 
 // ExecuteScanPipeline runs the end-to-end security assessment pipeline against the target URL.
@@ -128,6 +141,8 @@ func ExecuteScanPipeline(ctx context.Context, cfg *config.Config, opts ScanOptio
 			onProgress(stage, state, msg)
 		}
 	}
+
+	scanStarted := time.Now().UTC()
 
 	// 1. Target normalization and validation
 	raw := opts.Target
@@ -270,14 +285,51 @@ func ExecuteScanPipeline(ctx context.Context, cfg *config.Config, opts ScanOptio
 		progress(StageHTTPSecurity, StageStateFailed, "No HTTP response received")
 	}
 
-	// 6. Risk aggregation
+	// 6. Threat intelligence matching
+	progress(StageThreatIntelligence, StageStateRunning, "Evaluating local threat intelligence indicators...")
+	var intelObservations []risk.Observation
+	var intelCoverage *risk.IntelligenceCoverage
+
+	coords := intel.ExtractCoordinates(normalizedURL, domainInfo, nil)
+	matcher := intel.NewMatcher(opts.Storage)
+	intelSummary, intelErr := matcher.MatchTarget(scanCtx, coords)
+	if intelErr != nil || intelSummary.DatabaseUnavailable {
+		progress(StageThreatIntelligence, StageStateSkipped, "Local threat intelligence unavailable")
+		intelCoverage = &risk.IntelligenceCoverage{
+			Ran:                 false,
+			DatabaseUnavailable: true,
+			Detail:              "Threat intelligence storage not connected or query error",
+		}
+	} else {
+		intelObservations = intel.MatchesToObservations(intelSummary.Matches)
+		intelCoverage = &risk.IntelligenceCoverage{
+			Ran:                  intelSummary.Ran,
+			SourcesConfigured:    intelSummary.ConfiguredSources,
+			SourcesEnabled:       intelSummary.EnabledSources,
+			LastSuccessfulSync:   intelSummary.LastSyncTime,
+			IndicatorsConsidered: intelSummary.IndicatorsConsidered,
+			MatchesCount:         len(intelSummary.Matches),
+			DatabaseStale:        intelSummary.DatabaseStale,
+			DatabaseUnavailable:  intelSummary.DatabaseUnavailable,
+			Detail:               intelSummary.Detail,
+		}
+		if len(intelSummary.Matches) > 0 {
+			progress(StageThreatIntelligence, StageStateCompleted, fmt.Sprintf("%d threat indicators matched", len(intelSummary.Matches)))
+		} else {
+			progress(StageThreatIntelligence, StageStateCompleted, "No threat intelligence matches")
+		}
+	}
+
+	// 7. Risk aggregation
 	progress(StageRiskAggregation, StageStateRunning, "Aggregating findings into unified risk score...")
 	aggInput := risk.AggregationInput{
-		Target:     normalizedURL.Normalized,
-		AnalyzedAt: time.Now().UTC(),
-		URL:        urlResult,
-		Domain:     domainResult,
-		Web:        webResult,
+		Target:            normalizedURL.Normalized,
+		AnalyzedAt:        time.Now().UTC(),
+		URL:               urlResult,
+		Domain:            domainResult,
+		Web:               webResult,
+		IntelObservations: intelObservations,
+		IntelCoverage:     intelCoverage,
 	}
 	assessment, aggErr := risk.AggregateDefault(aggInput)
 	if aggErr != nil {
@@ -286,11 +338,55 @@ func ExecuteScanPipeline(ctx context.Context, cfg *config.Config, opts ScanOptio
 	progress(StageRiskAggregation, StageStateCompleted, "Risk assessment complete")
 
 	isBlocked := isSSRFBlockedTarget(normalizedURL.Hostname, webResult)
+	scanCompleted := time.Now().UTC()
+
+	status := storage.StatusCompleted
+	if isBlocked {
+		status = storage.StatusFailed
+	} else {
+		for _, cov := range assessment.AnalysisCoverage {
+			if cov.State == risk.ComponentFailed || cov.State == risk.ComponentPartial {
+				status = storage.StatusPartial
+				break
+			}
+		}
+	}
+
+	var scanRecord *storage.ScanRecord
+	// Persistence: exactly one persistence operation per completed scan
+	if opts.Storage != nil {
+		rec, saveErr := PersistScanAssessment(ctx, opts.Storage, assessment, normalizedURL.Normalized, scanStarted, scanCompleted, scanCompleted.Sub(scanStarted), status)
+		if saveErr != nil && opts.Verbose {
+			fmt.Fprintf(os.Stderr, "warning: failed to save scan to history: %v\n", saveErr)
+		} else {
+			scanRecord = rec
+		}
+	} else if !opts.NoPersist && cfg != nil && strings.TrimSpace(cfg.Storage.DatabasePath) != "" {
+		repo, err := storage.Open(cfg.Storage.DatabasePath)
+		if err != nil {
+			if opts.Verbose {
+				fmt.Fprintf(os.Stderr, "warning: cannot open history database: %v\n", err)
+			}
+		} else {
+			defer repo.Close()
+			rec, saveErr := PersistScanAssessment(ctx, repo, assessment, normalizedURL.Normalized, scanStarted, scanCompleted, scanCompleted.Sub(scanStarted), status)
+			if saveErr != nil && opts.Verbose {
+				fmt.Fprintf(os.Stderr, "warning: failed to save scan to history: %v\n", saveErr)
+			} else {
+				scanRecord = rec
+			}
+		}
+	}
+
 	return &ScanPipelineResult{
 		Assessment:    assessment,
+		ScanRecord:    scanRecord,
 		IsSSRFBlocked: isBlocked,
 		NormalizedURL: normalizedURL,
 		WebResult:     webResult,
+		StartedAt:     scanStarted,
+		CompletedAt:   scanCompleted,
+		Duration:      scanCompleted.Sub(scanStarted),
 	}, nil
 }
 
@@ -326,12 +422,48 @@ func RunScan(ctx context.Context, cfg *config.Config, opts ScanOptions, out io.W
 		return NewExitError(ExitScanFailure, "scan aborted: target %q is a private, loopback, or internal address blocked by SSRF protection", pipeRes.NormalizedURL.Hostname)
 	}
 
-	// 9. Optional risk threshold enforcement
+	// 10. Optional risk threshold enforcement
 	if opts.FailOnRisk != nil && assessment.OverallScore >= *opts.FailOnRisk {
 		return NewExitError(ExitRiskThresholdExceeded, "risk score %d meets or exceeds configured threshold %d", assessment.OverallScore, *opts.FailOnRisk)
 	}
 
 	return nil
+}
+
+// PersistScanAssessment persists a completed or partial scan assessment to local SQLite storage.
+func PersistScanAssessment(ctx context.Context, repo storage.Repository, assessment *risk.RiskAssessment, target string, startedAt, completedAt time.Time, duration time.Duration, status storage.ScanStatus) (*storage.ScanRecord, error) {
+	if repo == nil || assessment == nil {
+		return nil, nil
+	}
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+	if completedAt.IsZero() {
+		completedAt = startedAt.Add(duration)
+	}
+	if duration <= 0 && !completedAt.IsZero() && !startedAt.IsZero() {
+		duration = completedAt.Sub(startedAt)
+	}
+
+	record := storage.ScanRecord{
+		ID:             uuid.NewString(),
+		Target:         target,
+		StartedAt:      startedAt,
+		CompletedAt:    completedAt,
+		DurationMs:     duration.Milliseconds(),
+		OverallScore:   assessment.OverallScore,
+		Classification: assessment.Classification,
+		PolicyID:       assessment.PolicyID,
+		PolicyVersion:  assessment.PolicyVersion,
+		Status:         status,
+		SchemaVersion:  assessment.SchemaVersion,
+		CreatedAt:      time.Now().UTC(),
+	}
+
+	if err := repo.SaveScan(ctx, record, assessment); err != nil {
+		return nil, err
+	}
+	return &record, nil
 }
 
 func isSSRFBlockedTarget(host string, webResult *webintel.AnalysisResult) bool {

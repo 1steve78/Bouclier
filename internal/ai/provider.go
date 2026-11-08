@@ -1,6 +1,9 @@
 package ai
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Provider defines the minimal AI contract used by the application.
 type Provider interface {
@@ -25,8 +28,9 @@ type GenerateResult struct {
 
 // OllamaConfig configures a local Ollama-backed provider.
 type OllamaConfig struct {
-	BaseURL string `json:"base_url"`
-	Model   string `json:"model"`
+	BaseURL string        `json:"base_url"`
+	Model   string        `json:"model"`
+	Timeout time.Duration `json:"timeout,omitempty"`
 }
 
 // APIKeyConfig configures a provider that reads credentials from environment variables.

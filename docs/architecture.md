@@ -8,75 +8,93 @@ Phishing detection asks whether a URL or site may be deceptive or malicious. Web
 
 ### Implemented today
 
-- Cobra CLI with `--help`, `--version`, and `--config`.
-- JSON configuration loading, defaults, strict unknown-field handling, and validation.
-- A standard-library `log/slog` logger with text and JSON handlers, levels, and command-context injection.
-- Pure HTTP/HTTPS URL parsing, normalization, and offline destination classification in `internal/heuristics`, including IP and local-name characteristics.
-- Go tests, Makefile developer targets, and a GitHub Actions verification workflow.
-
-The CLI currently loads configuration and initializes the logger; the URL helper is an independently testable package and is not yet invoked by a scan command. **Bouclier does not perform phishing detection, scan websites, inspect certificates, fetch websites, query threat feeds, calculate risk, persist scan results, or provide a TUI.** Those are planned capabilities described below.
+- Cobra CLI commands: `bouclier scan`, `bouclier history` (`list`, `show`, `delete`), `bouclier intel` (`status`, `sources` [`list`, `add`, `remove`, `enable`, `disable`], `update`, `search`, `import`, `export`, `prune`), `bouclier tui`, `bouclier serve`, `bouclier config show`, `bouclier version`.
+- Interactive Bubble Tea Terminal UI (`internal/tui`) with live stage progress, keyboard navigation, findings filter, coverage analysis, report exporter, persistent scan history explorer, and dedicated threat intelligence explorer (`ScreenIntel`).
+- Local SQLite persistence engine (`internal/storage`) using pure-Go `modernc.org/sqlite` with schema migrations, WAL mode, foreign keys, cascading report storage, and normalized threat intelligence tables (`intel_sources`, `intel_indicators`, `intel_sync_runs`).
+- Collaborative Threat Intelligence subsystem (`internal/intel`):
+  - Local-first indicator matching during scans (exact URL, exact domain, registrable domain, exact IP).
+  - Secure feed ingestion pipeline (HTTPS only, SSRF protection, bounded memory/timeout, redirect handling).
+  - Collaborative bundle exchange format (`bouclier-intel-bundle/v1`) with deterministic SHA-256 integrity verification (guaranteeing file/transport integrity relative to the manifest; not an authenticated digital signature).
+  - Zero background telemetry or ambient sharing of target URLs.
+- Comprehensive security analysis pipeline:
+  - URL heuristics, homographs, entropy, brand impersonation (`internal/heuristics`).
+  - Domain structure, DNS intelligence, registration analysis (`internal/domain`, `internal/registration`).
+  - TLS handshake, certificate analysis, validation, key strength (`internal/tlscheck`, `internal/tlsintel`, `internal/certanalysis`).
+  - Certificate Transparency log querying and evidence aggregation (`internal/ct`).
+  - Passive HTTP inspection, security headers, cookie security, CORS, disclosure (`internal/webcheck`, `internal/webintel`).
+- Unified risk engine (`internal/risk`):
+  - Deterministic capped integer weighted-sum scoring (0–100 relative index).
+  - Risk classifications: `low`, `guarded`, `elevated`, `high`, `critical`.
+  - Canonical `bouclier-risk/v1` reporting schema.
+- Report rendering in terminal ANSI color, JSON, and Markdown (`internal/report`, `internal/cli`).
+- HTTP API server (`internal/api`) binding to loopback with health and scan endpoints.
+- Configuration loading, secret redaction, context-injected `log/slog` logging.
 
 ## High-level architecture
 
-The intended application has a thin interface layer over a reusable scanning engine. The CLI and future TUI submit the same `ScanRequest` to the same scanner interface and consume the same `ScanResult` model. The scanner must not import Cobra, terminal UI packages, or presentation code. This keeps scanning usable from another interface or a future service without changing its core.
-
-1. **CLI layer** â€” parses flags, loads configuration, creates the application logger, validates command input, invokes the scanner interface, and renders output. The Cobra root and bootstrap path exist; scan commands do not.
-2. **Scanner orchestration** â€” coordinates analysis modules, applies shared time and concurrency budgets, gathers findings, and returns a unified result. Planned; no scanner package exists yet.
-3. **URL intelligence and heuristics** â€” the pure HTTP/HTTPS parser and normalizer is implemented. Suspicious URL pattern checks for hostname and path structure are implemented; brand impersonation and typosquatting signals are implemented; broader URL analysis remains planned.
-4. **Domain intelligence** â€” gathers domain and DNS facts useful to assessment, subject to destination and privacy policy. Planned.
-5. **TLS and certificate analysis** â€” inspects the negotiated connection and certificate properties, returning structured observations. Planned.
-6. **HTTP security assessment** â€” performs bounded requests and evaluates response properties such as security headers and redirect behavior. Planned.
-7. **Threat intelligence** â€” consults configured feeds or providers and records source and freshness with each result. Planned.
-8. **Risk scoring and reporting** â€” combines findings under a documented policy, produces a score and verdict, and renders a unified report. Planned.
-9. **Persistence** â€” optionally stores reports or cache entries. SQLite is a future choice; no database code exists.
-10. **TUI layer** â€” presents the same scan interfaces and report models interactively. Planned; the current `internal/tui` directory is a placeholder only.
-
-Modules should communicate through explicit request/result values or narrow interfaces. Analysis modules emit structured findings with evidence, severity, and confidence. The scoring policy, rather than any individual module, determines the overall score and verdict.
+The application has a thin interface layer (CLI, TUI, and HTTP API) over a reusable scanning pipeline and persistence layer:
 
 ```mermaid
-flowchart LR
+flowchart TD
     User[User]
-    CLI[CLI and Cobra<br/>implemented]
-    Config[JSON configuration<br/>implemented]
-    Logger[Context-injected slog logger<br/>implemented]
-    TUI[TUI<br/>planned]
-    Engine[Scanner orchestration<br/>planned]
-    Normalize[URL normalization and validation<br/>implemented]
-    URLHeuristics[Suspicious URL patterns<br/>partially implemented]
-    Domain[Domain intelligence<br/>planned]
-    TLS[TLS and certificate analysis<br/>planned]
-    HTTP[HTTP security assessment<br/>planned]
-    Intel[Threat intelligence<br/>planned]
-    Score[Risk scoring and report generation<br/>planned]
-    Result[Unified ScanResult<br/>planned]
-    JSON[JSON output<br/>planned]
-    Store[(Optional persistence<br/>planned)]
+    CLI[Cobra CLI: scan, history, config, version]
+    TUI[Bubble Tea Interactive TUI]
+    API[Loopback HTTP API Server]
+
+    Orch[Scan Orchestration / Pipeline]
+    StorageRepo[Storage Repository Interface]
+    SQLite[(SQLite Database: ~/.bouclier/bouclier.db)]
+
+    URLMod[URL & Domain Heuristics]
+    TLSMod[TLS & Cert Analysis]
+    CTMod[Certificate Transparency]
+    HTTPMod[Passive HTTP Inspection]
+    RiskEngine[Risk Aggregator & Scoring Engine]
 
     User --> CLI
-    CLI --> Config
-    CLI --> Logger
-    CLI -. future scan request .-> Engine
-    TUI -. same scanner interface .-> Engine
-    Engine --> Normalize
-    Normalize --> URLHeuristics
-    URLHeuristics --> Domain
-    Domain --> TLS
-    TLS --> HTTP
-    HTTP --> Intel
-    Intel --> Score
-    Score --> Result
-    Result --> CLI
-    Result --> TUI
-    Result --> JSON
-    Result -. optional write .-> Store
+    User --> TUI
+    User --> API
 
-    classDef implemented fill:#d9ead3,stroke:#38761d,color:#111
-    classDef planned fill:#eeeeee,stroke:#666,color:#111,stroke-dasharray: 5 5
-    class CLI,Config,Logger,Normalize,URLHeuristics implemented
-    class TUI,Engine,Domain,TLS,HTTP,Intel,Score,Result,JSON,Store planned
+    CLI --> Orch
+    TUI --> Orch
+    API --> Orch
+
+    CLI --> StorageRepo
+    TUI --> StorageRepo
+    Orch -. persist scan .-> StorageRepo
+    StorageRepo --> SQLite
+
+    Orch --> URLMod
+    Orch --> TLSMod
+    Orch --> CTMod
+    Orch --> HTTPMod
+    URLMod --> RiskEngine
+    TLSMod --> RiskEngine
+    CTMod --> RiskEngine
+    HTTPMod --> RiskEngine
 ```
 
-Solid green nodes are present in the current foundation. Dashed gray nodes and dashed request/storage edges describe planned work.
+### Persistence Architecture (`internal/storage`)
+
+Local persistence retains scan assessments across application restarts:
+
+1. **Driver & Portability**: Uses `modernc.org/sqlite` (pure-Go CGO-free SQLite driver), enabling cross-compilation across Windows, Linux, and macOS without native toolchains.
+2. **Connection Lifecycle & Concurrency**:
+   - Configured with `_pragma=busy_timeout(5000)` and `_pragma=journal_mode(WAL)` for concurrent reader and writer operations without database lock errors.
+   - Enforces `_pragma=foreign_keys(1)` for relational integrity.
+   - Filesystem directories are created with secure permissions (`0700`).
+   - Connection pool limits open connections to 1 for `:memory:` (preserving state) and 4 for disk files.
+3. **Database Schema & Versioned Migrations**:
+   - Managed through `schema_migrations` table executing atomic migration transactions.
+   - `scans` table stores indexed metadata: `id` (UUID), `target`, `started_at`, `completed_at`, `duration_ms`, `status`, `overall_score`, `classification`, `findings_count`, and `engine_version`.
+   - `scan_reports` table stores the complete sanitized JSON report (`report_json`) adhering to `bouclier-risk/v1` with `FOREIGN KEY (scan_id) REFERENCES scans(id) ON DELETE CASCADE`.
+4. **ID Resolution & Ambiguity Protection**:
+   - Supports 8-character short IDs (e.g., `7a9b2c3d`) or full 36-character UUIDs.
+   - Queries `WHERE id LIKE prefix% LIMIT 3` to resolve short IDs, returning `ErrNotFound` on 0 matches and `ErrAmbiguousID` if multiple scans match.
+5. **Data Retention & Privacy Boundaries**:
+   - Stores only sanitized, normalized findings, scores, and metadata.
+   - Never stores secrets, credentials, tokens, or raw HTTP response bodies.
+   - Persistence failures are non-fatal: errors are logged as warnings, ensuring scan execution and exit codes are never destroyed by storage issues.
 
 ## Proposed package structure
 
@@ -387,3 +405,42 @@ The interface is structured as an interactive state machine (`Screen` enum):
 - Interactivity is verified on launch using `isatty.IsTerminal`; non-interactive invocations return a clear error redirecting users to `bouclier scan <url>`.
 - The UI handles terminal resizes (`tea.WindowSizeMsg`) responsively, adapting cards and tables to terminal dimensions.
 - Monochrome mode (`--no-color` or `NO_COLOR`) disables ANSI color sequences while preserving layout and structure.
+
+## Security, Reliability & Hardening Architecture (Phase 10)
+
+Phase 10 hardened all core subsystems against hostile inputs, concurrency contention, SSRF pivot attacks, resource exhaustion, and information disclosure.
+
+### 1. Network Security & SSRF Protection Model
+- **Strict Destination Filtering**: Outbound dialers in `internal/webcheck` and `internal/intel` resolve hostnames and inspect all returned IP addresses. Connections are rejected if any address matches:
+  - Loopback (`127.0.0.0/8`, `::1`)
+  - RFC 1918 Private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`)
+  - Carrier-Grade NAT (`100.64.0.0/10`)
+  - Link-local (`169.254.0.0/16`, `fe80::/10`)
+  - Documentation subnets (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`)
+  - Benchmarking subnets (`198.18.0.0/15`)
+  - Multicast (`224.0.0.0/4`, `ff00::/8`)
+  - Non-global unicast and scoped IPv6 zones (`addr.Zone() != ""`)
+- **DNS Pinning**: The dialer pins the TCP connection directly to the pre-validated IP address, defeating Time-of-Check to Time-of-Use (TOCTOU) DNS rebinding attacks while preserving correct TLS Server Name Indication (SNI) and HTTP Host headers.
+- **Port Whitelisting**: Remote intelligence feeds are restricted to standard web ports (`80`, `443`, `8080`, `8443`), preventing feed ingestion from triggering connections to internal services (e.g. port 22 SSH or port 25 SMTP).
+- **Environment Isolation**: External CT logs (`internal/ct`) and website HTTP dialers use explicit `http.Transport` configurations with `Proxy: nil`, preventing compromised environment variables (`HTTP_PROXY`, `HTTPS_PROXY`) from redirecting security probes.
+
+### 2. Input Validation & Resource Exhaustion Controls
+- **Bounded Readers with Overflow Detection**: Feed and bundle parsers read `MaxFeedSizeBytes + 1` bytes (10 MiB limit). Exceeding this boundary immediately aborts with `ErrFeedTooLarge`, preventing both unbounded memory allocation and silent truncation.
+- **Record Limits**: Threat intelligence parsers enforce a ceiling of `MaxFeedRecords = 50,000` indicators per feed.
+- **Input String Limits**: `NormalizeURL` caps URLs at `MaxURLLength = 8,192` bytes. Indicator normalizers enforce `MaxIndicatorLength = 8,192` bytes and `MaxDomainLength = 253` characters before IDNA or regex execution.
+- **Local Payloads**: API requests, MCP tool arguments, and configuration files are bounded to `1 MiB`.
+
+### 3. Concurrency & SQLite Transaction Reliability
+- **WAL Mode & Lock Serialization**: Pure-Go SQLite (`modernc.org/sqlite`) runs with Write-Ahead Logging (`WAL`) and `busy_timeout = 5000ms`.
+- **Write Mutex (`writeMu`)**: Because deferred transactions can encounter deadlocks (`SQLITE_BUSY`) when concurrent goroutines upgrade read locks to write locks, mutating operations (`SaveScan`, `SaveIndicatorBatch`, `DeleteScan`, `RegisterSource`, etc.) are synchronized using an application-level write mutex in `storage.DB`. Concurrent reads continue in parallel without blocking.
+- **Goroutine Lifetime**: All asynchronous operations (pipeline stages, TUI scan commands, API requests) accept bounded `context.Context` parameters. Cancelling the context cleanly aborts in-flight dialers, HTTP bodies, and SQLite queries without leaking goroutines.
+
+### 4. API & Local Loopback Security
+- **Loopback Binding**: The HTTP API server (`internal/api`) binds strictly to loopback (`127.0.0.1`).
+- **Origin Validation**: To prevent drive-by CSRF and cross-site port scanning from web browsers running on the host machine, incoming requests with an `Origin` header are verified. Requests from non-loopback origins are rejected with HTTP 403 Forbidden (`forbidden_origin`).
+- **Media Type Enforcement**: JSON endpoints require `Content-Type: application/json`, rejecting unexpected payloads with HTTP 415.
+
+### 5. Sensitive Data Redaction in Logging
+- Structured logging (`internal/logging`) implements a custom attribute replacement handler (`redactLogAttr`).
+- Automatically replaces values for keys containing `password`, `token`, `secret`, `api_key`, `auth`, or `cookie` with `[REDACTED]`.
+- Strips credential query parameters and authorization bearer tokens from URLs and headers across all log levels.

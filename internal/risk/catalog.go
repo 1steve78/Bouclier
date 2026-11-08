@@ -97,6 +97,11 @@ func buildCatalog() map[string]CatalogEntry {
 		entry("WEB_TECHNOLOGY_DISCLOSURE_X_POWERED_BY", SeverityInformational, ConfidenceHigh, "web-information-disclosure", "Consider removing unnecessary framework identification headers.", false),
 		entry("WEB_TECHNOLOGY_DISCLOSURE_X_ASPNET_VERSION", SeverityInformational, ConfidenceHigh, "web-information-disclosure", "Consider removing unnecessary platform version headers.", false),
 		entry("WEB_TECHNOLOGY_DISCLOSURE_X_GENERATOR", SeverityInformational, ConfidenceHigh, "web-information-disclosure", "Consider removing unnecessary generator metadata headers.", false),
+		entry("INTEL_MALICIOUS_URL", SeverityCritical, ConfidenceHigh, "threat-intelligence", "Avoid accessing this destination; the URL is flagged as malicious in threat intelligence feeds.", true),
+		entry("INTEL_MALICIOUS_DOMAIN", SeverityHigh, ConfidenceHigh, "threat-intelligence", "Avoid interacting with this domain; the hostname matches a confirmed malicious indicator.", true),
+		entry("INTEL_MALICIOUS_IP", SeverityHigh, ConfidenceHigh, "threat-intelligence", "Inspect traffic to this destination; the resolved server IP is flagged in threat intelligence.", true),
+		entry("INTEL_SUSPICIOUS_REGISTRABLE_DOMAIN", SeverityMedium, ConfidenceMedium, "threat-intelligence", "Exercise caution; the parent registrable domain is flagged in threat intelligence feeds.", true),
+		entry("INTEL_MATCH_STALE", SeverityLow, ConfidenceLow, "threat-intelligence", "Verify current domain reputation; the destination matches a historical/stale threat indicator.", true),
 	}
 	result := make(map[string]CatalogEntry, len(entries))
 	for _, item := range entries {

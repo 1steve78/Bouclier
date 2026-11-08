@@ -23,6 +23,9 @@ and passive website security checks into a unified, explainable risk assessment.
 Commands:
   tui       Launch the interactive terminal user interface
   scan      Assess a target URL for phishing indicators and security risks
+  history   Inspect and manage saved scan assessments
+  intel     Manage local threat intelligence feeds and indicators
+  mcp       Start the stdio Model Context Protocol server
   serve     Start the local Bouclier HTTP API server
   version   Display version and build metadata
   config    Inspect active scanner and application settings
@@ -33,6 +36,9 @@ Examples:
   bouclier scan https://example.com --format json
   bouclier scan https://example.com --format markdown --output report.md
   bouclier scan https://example.com --no-ct --timeout 15s
+  bouclier history list
+  bouclier history show <scan-id>
+  bouclier mcp
   bouclier serve
   bouclier config show
   bouclier version`,
@@ -73,6 +79,9 @@ Examples:
 
 	rootCmd.AddCommand(newTUICommand(getConfig))
 	rootCmd.AddCommand(newScanCommand(getConfig))
+	rootCmd.AddCommand(newHistoryCommand(getConfig))
+	rootCmd.AddCommand(newIntelCommand(getConfig))
+	rootCmd.AddCommand(newMCPCommand(getConfig))
 	rootCmd.AddCommand(newServeCommand(getConfig))
 	rootCmd.AddCommand(newVersionCommand())
 	rootCmd.AddCommand(newConfigCommand(getConfig))

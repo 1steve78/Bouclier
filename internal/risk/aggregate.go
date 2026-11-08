@@ -15,15 +15,17 @@ import (
 
 // AggregationInput references existing layer results instead of copying them.
 type AggregationInput struct {
-	Target          string
-	AnalyzedAt      time.Time
-	URL             *heuristics.AnalysisResult
-	Domain          *domain.AnalysisResult
-	TLS             *tlsintel.AnalysisResult
-	Web             *webintel.AnalysisResult
-	RegistrationAge *registration.AgeAnalysis
-	Coverage        []ComponentCoverage
-	Limitations     []string
+	Target            string
+	AnalyzedAt        time.Time
+	URL               *heuristics.AnalysisResult
+	Domain            *domain.AnalysisResult
+	TLS               *tlsintel.AnalysisResult
+	Web               *webintel.AnalysisResult
+	RegistrationAge   *registration.AgeAnalysis
+	IntelObservations []Observation
+	IntelCoverage     *IntelligenceCoverage
+	Coverage          []ComponentCoverage
+	Limitations       []string
 }
 
 // Aggregate combines existing observations, coverage, and optional
@@ -63,6 +65,9 @@ func Aggregate(input AggregationInput, policy Policy) (*RiskAssessment, error) {
 			observations = append(observations, FromHeuristicFinding(f, SourceWeb))
 		}
 	}
+	if len(input.IntelObservations) > 0 {
+		observations = append(observations, input.IntelObservations...)
+	}
 	registrationAge := input.RegistrationAge
 	if registrationAge == nil && input.Domain != nil {
 		registrationAge = input.Domain.RegistrationAge
@@ -78,6 +83,29 @@ func Aggregate(input AggregationInput, policy Policy) (*RiskAssessment, error) {
 	assessment.Target = canonical
 	assessment.AnalyzedAt = analysisTime(input)
 	assessment.AnalysisCoverage = buildCoverage(input, registrationAge)
+	if input.IntelCoverage != nil {
+		assessment.Intelligence = input.IntelCoverage
+		intelState := ComponentCompleted
+		intelDetail := fmt.Sprintf("%d matches, %d indicators evaluated", input.IntelCoverage.MatchesCount, input.IntelCoverage.IndicatorsConsidered)
+		if input.IntelCoverage.DatabaseUnavailable {
+			intelState = ComponentFailed
+			intelDetail = "threat intelligence database unavailable"
+		} else if !input.IntelCoverage.Ran {
+			intelState = ComponentSkipped
+			intelDetail = "threat intelligence matching skipped"
+		} else if input.IntelCoverage.DatabaseStale {
+			intelState = ComponentPartial
+			intelDetail = "threat intelligence database is stale"
+		} else if input.IntelCoverage.MatchesCount == 0 {
+			intelState = ComponentNoResults
+			intelDetail = "no threat intelligence matches found"
+		}
+		assessment.AnalysisCoverage = append(assessment.AnalysisCoverage, ComponentCoverage{
+			Component: "threat-intelligence",
+			State:     intelState,
+			Detail:    intelDetail,
+		})
+	}
 	assessment.RegistrationAge = cloneAge(registrationAge)
 	assessment.Limitations = append([]string(nil), input.Limitations...)
 	for _, coverage := range assessment.AnalysisCoverage {

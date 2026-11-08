@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,9 @@ import (
 	"bouclier/internal/certanalysis"
 	"bouclier/internal/config"
 	"bouclier/internal/heuristics"
+	"bouclier/internal/intel"
 	"bouclier/internal/risk"
+	"bouclier/internal/storage"
 	"bouclier/internal/tlsintel"
 	"bouclier/internal/webintel"
 )
@@ -632,5 +635,642 @@ func TestExitCodes(t *testing.T) {
 	}
 	if code := ExitCode(NewExitError(ExitRiskThresholdExceeded, "threshold exceeded")); code != ExitRiskThresholdExceeded {
 		t.Fatalf("threshold error should return %d, got %d", ExitRiskThresholdExceeded, code)
+	}
+}
+
+func TestHistoryCLI(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "history_cli.db")
+	cfg := config.Default()
+	cfg.Storage.DatabasePath = dbPath
+
+	ctx := context.Background()
+
+	// 1. Empty list
+	var buf bytes.Buffer
+	err := RunHistoryList(ctx, cfg, HistoryListOptions{}, &buf)
+	if err != nil {
+		t.Fatalf("empty history list error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "No scan history found") {
+		t.Fatalf("expected empty history message, got:\n%s", buf.String())
+	}
+
+	// 2. Populate scans using PersistScanAssessment
+	repo, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	ass1 := sampleAssessmentForTerminal(t)
+	ass1.Target = "https://site-a.com"
+	rec1, err := PersistScanAssessment(ctx, repo, ass1, "https://site-a.com", time.Now().Add(-10*time.Minute), time.Now().Add(-9*time.Minute), time.Minute, storage.StatusCompleted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ass2 := sampleAssessmentForTerminal(t)
+	ass2.Target = "https://phish-site.cc"
+	rec2, err := PersistScanAssessment(ctx, repo, ass2, "https://phish-site.cc", time.Now().Add(-5*time.Minute), time.Now().Add(-4*time.Minute), time.Minute, storage.StatusCompleted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. List in terminal format
+	buf.Reset()
+	err = RunHistoryList(ctx, cfg, HistoryListOptions{NoColor: true}, &buf)
+	if err != nil {
+		t.Fatalf("history list error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Scan History (Total: 2)") || !strings.Contains(out, "https://site-a.com") || !strings.Contains(out, "https://phish-site.cc") {
+		t.Fatalf("unexpected history table:\n%s", out)
+	}
+
+	// 4. List in JSON format
+	buf.Reset()
+	err = RunHistoryList(ctx, cfg, HistoryListOptions{Format: "json"}, &buf)
+	if err != nil {
+		t.Fatalf("history list json error: %v", err)
+	}
+	var listResp HistoryListResponse
+	if err := json.Unmarshal(buf.Bytes(), &listResp); err != nil {
+		t.Fatalf("unmarshal history json response: %v\nJSON:\n%s", err, buf.String())
+	}
+	if listResp.Total != 2 || len(listResp.Items) != 2 {
+		t.Fatalf("expected 2 items in json response, got total %d, items %d", listResp.Total, len(listResp.Items))
+	}
+
+	// 5. Filter list by target
+	buf.Reset()
+	err = RunHistoryList(ctx, cfg, HistoryListOptions{Target: "phish", Format: "json"}, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var filterResp HistoryListResponse
+	if err := json.Unmarshal(buf.Bytes(), &filterResp); err != nil {
+		t.Fatal(err)
+	}
+	if filterResp.Total != 1 || filterResp.Items[0].Target != "https://phish-site.cc" {
+		t.Fatalf("expected 1 filtered match for phish, got %+v", filterResp)
+	}
+
+	// 6. Show history entry
+	buf.Reset()
+	err = RunHistoryShow(ctx, cfg, HistoryShowOptions{ID: rec1.ShortID(), Format: "markdown"}, &buf)
+	if err != nil {
+		t.Fatalf("history show error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "# Bouclier Website Risk Assessment") || !strings.Contains(buf.String(), "site-a.com") {
+		t.Fatalf("unexpected history show markdown:\n%s", buf.String())
+	}
+
+	// 7. Show invalid ID
+	err = RunHistoryShow(ctx, cfg, HistoryShowOptions{ID: "non-existent-id"}, &buf)
+	if err == nil || ExitCode(err) != ExitScanFailure {
+		t.Fatalf("expected ExitScanFailure for non-existent scan ID, got %v", err)
+	}
+
+	// 8. Delete with cancellation
+	buf.Reset()
+	stdinCancel := strings.NewReader("n\n")
+	err = RunHistoryDelete(ctx, cfg, HistoryDeleteOptions{ID: rec2.ShortID(), Stdin: stdinCancel}, &buf)
+	if err != nil {
+		t.Fatalf("history delete cancel error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Deletion cancelled") {
+		t.Fatalf("expected deletion cancelled, got:\n%s", buf.String())
+	}
+
+	// 9. Delete with --yes bypass
+	buf.Reset()
+	err = RunHistoryDelete(ctx, cfg, HistoryDeleteOptions{ID: rec2.ShortID(), Yes: true}, &buf)
+	if err != nil {
+		t.Fatalf("history delete --yes error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "deleted") {
+		t.Fatalf("expected deleted confirmation, got:\n%s", buf.String())
+	}
+
+	// Verify only 1 scan remains
+	buf.Reset()
+	_ = RunHistoryList(ctx, cfg, HistoryListOptions{Format: "json"}, &buf)
+	var afterDelete HistoryListResponse
+	_ = json.Unmarshal(buf.Bytes(), &afterDelete)
+	if afterDelete.Total != 1 {
+		t.Fatalf("expected 1 scan after deletion, got %d", afterDelete.Total)
+	}
+}
+
+func TestRunScanPersistsAssessment(t *testing.T) {
+	restore := SetWebsiteAnalyzerForTesting(func(ctx context.Context, input *heuristics.NormalizedURL, options webintel.Options) (*webintel.AnalysisResult, error) {
+		return &webintel.AnalysisResult{
+			RequestedURL: input.Normalized,
+			FinalURL:     input.Normalized,
+			HTTPStatus:   webintel.ComponentStatus{State: webintel.StateCompleted},
+			TLSStatus:    webintel.ComponentStatus{State: webintel.StateCompleted},
+		}, nil
+	})
+	defer restore()
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "auto_save.db")
+	cfg := config.Default()
+	cfg.Storage.DatabasePath = dbPath
+
+	var buf bytes.Buffer
+	opts := ScanOptions{
+		Target: "https://example.com",
+		NoCT:   true,
+	}
+
+	if err := RunScan(context.Background(), cfg, opts, &buf); err != nil {
+		t.Fatalf("run scan error: %v", err)
+	}
+
+	// Check that scan was automatically persisted to SQLite
+	repo, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer repo.Close()
+
+	count, err := repo.CountScans(context.Background(), storage.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 persisted scan after RunScan, got %d", count)
+	}
+
+	list, err := repo.ListScans(context.Background(), storage.ListFilter{})
+	if err != nil || len(list) != 1 {
+		t.Fatalf("unexpected list: %+v", list)
+	}
+	if !strings.Contains(list[0].Target, "example.com") {
+		t.Fatalf("unexpected saved target: %s", list[0].Target)
+	}
+}
+
+func TestOneCLIScanCreatesExactlyOneRecord(t *testing.T) {
+	restore := SetWebsiteAnalyzerForTesting(func(ctx context.Context, input *heuristics.NormalizedURL, options webintel.Options) (*webintel.AnalysisResult, error) {
+		return &webintel.AnalysisResult{
+			RequestedURL: input.Normalized,
+			FinalURL:     input.Normalized,
+			HTTPStatus:   webintel.ComponentStatus{State: webintel.StateCompleted},
+			TLSStatus:    webintel.ComponentStatus{State: webintel.StateCompleted},
+		}, nil
+	})
+	defer restore()
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "single_record.db")
+	cfg := config.Default()
+	cfg.Storage.DatabasePath = dbPath
+
+	var buf bytes.Buffer
+	opts := ScanOptions{
+		Target: "https://site-one.com",
+		NoCT:   true,
+	}
+
+	// First scan
+	if err := RunScan(context.Background(), cfg, opts, &buf); err != nil {
+		t.Fatalf("first scan error: %v", err)
+	}
+
+	repo, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer repo.Close()
+
+	ctx := context.Background()
+	count, err := repo.CountScans(ctx, storage.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly 1 record after first scan, got %d", count)
+	}
+
+	// Second scan against different target
+	buf.Reset()
+	opts2 := ScanOptions{
+		Target: "https://site-two.com",
+		NoCT:   true,
+	}
+	if err := RunScan(context.Background(), cfg, opts2, &buf); err != nil {
+		t.Fatalf("second scan error: %v", err)
+	}
+
+	count, err = repo.CountScans(ctx, storage.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("expected exactly 2 records after second scan, got %d", count)
+	}
+}
+
+func TestCancelledScanDoesNotPersist(t *testing.T) {
+	restore := SetWebsiteAnalyzerForTesting(func(ctx context.Context, input *heuristics.NormalizedURL, options webintel.Options) (*webintel.AnalysisResult, error) {
+		return nil, context.Canceled
+	})
+	defer restore()
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "cancelled.db")
+	cfg := config.Default()
+	cfg.Storage.DatabasePath = dbPath
+
+	var buf bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel context
+
+	opts := ScanOptions{
+		Target: "https://cancelled.org",
+		NoCT:   true,
+	}
+
+	_ = RunScan(ctx, cfg, opts, &buf)
+
+	repo, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer repo.Close()
+
+	count, err := repo.CountScans(context.Background(), storage.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 records for cancelled scan, got %d", count)
+	}
+}
+
+func TestSSRFBlockedScanPersistsWithFailedStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "ssrf.db")
+	cfg := config.Default()
+	cfg.Storage.DatabasePath = dbPath
+
+	var buf bytes.Buffer
+	opts := ScanOptions{
+		Target: "http://127.0.0.1/",
+		NoCT:   true,
+	}
+
+	err := RunScan(context.Background(), cfg, opts, &buf)
+	if err == nil {
+		t.Fatal("expected SSRF failure error for 127.0.0.1")
+	}
+
+	repo, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer repo.Close()
+
+	list, err := repo.ListScans(context.Background(), storage.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 record persisted for SSRF blocked scan, got %d", len(list))
+	}
+	if list[0].Status != storage.StatusFailed {
+		t.Fatalf("expected status %q, got %q", storage.StatusFailed, list[0].Status)
+	}
+}
+
+func TestPersistedMetadataCompleteness(t *testing.T) {
+	restore := SetWebsiteAnalyzerForTesting(func(ctx context.Context, input *heuristics.NormalizedURL, options webintel.Options) (*webintel.AnalysisResult, error) {
+		return &webintel.AnalysisResult{
+			RequestedURL: input.Normalized,
+			FinalURL:     input.Normalized,
+			HTTPStatus:   webintel.ComponentStatus{State: webintel.StateCompleted},
+			TLSStatus:    webintel.ComponentStatus{State: webintel.StateCompleted},
+		}, nil
+	})
+	defer restore()
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "metadata.db")
+	cfg := config.Default()
+	cfg.Storage.DatabasePath = dbPath
+
+	var buf bytes.Buffer
+	opts := ScanOptions{
+		Target: "https://meta-audit.org",
+		NoCT:   true,
+	}
+
+	if err := RunScan(context.Background(), cfg, opts, &buf); err != nil {
+		t.Fatalf("run scan error: %v", err)
+	}
+
+	repo, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer repo.Close()
+
+	ctx := context.Background()
+	list, err := repo.ListScans(ctx, storage.ListFilter{})
+	if err != nil || len(list) != 1 {
+		t.Fatalf("expected 1 scan, got %+v", list)
+	}
+	rec := list[0]
+
+	// 1. Scan ID
+	if rec.ID == "" || len(rec.ID) < 16 {
+		t.Fatalf("invalid scan ID: %q", rec.ID)
+	}
+	// 2. Sanitized target
+	if !strings.Contains(rec.Target, "meta-audit.org") {
+		t.Fatalf("invalid target: %q", rec.Target)
+	}
+	// 3. Started and completed timestamps
+	if rec.StartedAt.IsZero() || rec.CompletedAt.IsZero() {
+		t.Fatalf("zero timestamp: started=%v completed=%v", rec.StartedAt, rec.CompletedAt)
+	}
+	// 4. Duration
+	if rec.DurationMs < 0 {
+		t.Fatalf("negative duration: %d", rec.DurationMs)
+	}
+	// 5. Scan status
+	if rec.Status != storage.StatusCompleted && rec.Status != storage.StatusPartial {
+		t.Fatalf("unexpected status: %v", rec.Status)
+	}
+	// 6. Overall score and classification
+	if rec.OverallScore < 0 || rec.OverallScore > 100 {
+		t.Fatalf("invalid score: %d", rec.OverallScore)
+	}
+	if rec.Classification == "" {
+		t.Fatal("empty classification")
+	}
+	// 7. Policy ID and version
+	if rec.PolicyID != "bouclier-default" || rec.PolicyVersion == "" {
+		t.Fatalf("invalid policy metadata: id=%s version=%s", rec.PolicyID, rec.PolicyVersion)
+	}
+	// 8. Report schema version
+	if rec.SchemaVersion != "bouclier-risk/v1" {
+		t.Fatalf("invalid schema version: %s", rec.SchemaVersion)
+	}
+	// 9. Creation timestamp
+	if rec.CreatedAt.IsZero() {
+		t.Fatal("zero creation timestamp")
+	}
+	// 10. Complete sanitized assessment in scan_reports
+	report, err := repo.GetScanReport(ctx, rec.ID)
+	if err != nil {
+		t.Fatalf("GetScanReport failed: %v", err)
+	}
+	if report.Assessment == nil {
+		t.Fatal("assessment in report is nil")
+	}
+	if report.Assessment.SchemaVersion != "bouclier-risk/v1" {
+		t.Fatalf("unexpected assessment schema version: %s", report.Assessment.SchemaVersion)
+	}
+	if len(report.Assessment.AnalysisCoverage) == 0 {
+		t.Fatal("expected non-empty analysis coverage in persisted assessment")
+	}
+}
+
+func TestEndToEndPersistenceLifecycleFlow(t *testing.T) {
+	restore := SetWebsiteAnalyzerForTesting(func(ctx context.Context, input *heuristics.NormalizedURL, options webintel.Options) (*webintel.AnalysisResult, error) {
+		return &webintel.AnalysisResult{
+			RequestedURL: input.Normalized,
+			FinalURL:     input.Normalized,
+			HTTPStatus:   webintel.ComponentStatus{State: webintel.StateCompleted},
+			TLSStatus:    webintel.ComponentStatus{State: webintel.StateCompleted},
+		}, nil
+	})
+	defer restore()
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lifecycle_flow.db")
+	cfg := config.Default()
+	cfg.Storage.DatabasePath = dbPath
+
+	ctx := context.Background()
+	var buf bytes.Buffer
+
+	// Step 1: Scan a target
+	scanOpts := ScanOptions{
+		Target: "https://lifecycle-audit.org",
+		NoCT:   true,
+	}
+	if err := RunScan(ctx, cfg, scanOpts, &buf); err != nil {
+		t.Fatalf("step 1 scan error: %v", err)
+	}
+
+	// Step 2: Verify exactly one database record is created
+	db1, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db1: %v", err)
+	}
+	count, err := db1.CountScans(ctx, storage.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("step 2: expected exactly 1 record, got %d", count)
+	}
+	list1, err := db1.ListScans(ctx, storage.ListFilter{})
+	if err != nil || len(list1) != 1 {
+		t.Fatalf("step 2 list failed: %+v", list1)
+	}
+	scanID := list1[0].ID
+
+	// Step 3: Exit the application (close database connection)
+	if err := db1.Close(); err != nil {
+		t.Fatalf("step 3 close db1: %v", err)
+	}
+
+	// Step 4: Restart it (re-open database at same path)
+	db2, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("step 4 re-open db2: %v", err)
+	}
+	defer db2.Close()
+
+	// Step 5: Retrieve the scan using history list and history show
+	buf.Reset()
+	if err := RunHistoryList(ctx, cfg, HistoryListOptions{Format: "json"}, &buf); err != nil {
+		t.Fatalf("step 5 history list error: %v", err)
+	}
+	var listResp HistoryListResponse
+	if err := json.Unmarshal(buf.Bytes(), &listResp); err != nil {
+		t.Fatalf("step 5 unmarshal list error: %v", err)
+	}
+	if listResp.Total != 1 || listResp.Items[0].ID != scanID {
+		t.Fatalf("step 5 list mismatch: %+v", listResp)
+	}
+
+	buf.Reset()
+	if err := RunHistoryShow(ctx, cfg, HistoryShowOptions{ID: scanID, Format: "terminal"}, &buf); err != nil {
+		t.Fatalf("step 5 history show error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "lifecycle-audit.org") {
+		t.Fatalf("step 5 show missing target in output:\n%s", buf.String())
+	}
+
+	// Step 6: Export JSON and Markdown
+	jsonPath := filepath.Join(tmpDir, "exported-report.json")
+	if err := RunHistoryShow(ctx, cfg, HistoryShowOptions{ID: scanID, Format: "json", Output: jsonPath}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("step 6 export json error: %v", err)
+	}
+	jsonData, err := os.ReadFile(jsonPath)
+	if err != nil || len(jsonData) == 0 {
+		t.Fatalf("step 6 empty json export: %v", err)
+	}
+
+	mdPath := filepath.Join(tmpDir, "exported-report.md")
+	if err := RunHistoryShow(ctx, cfg, HistoryShowOptions{ID: scanID, Format: "markdown", Output: mdPath}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("step 6 export markdown error: %v", err)
+	}
+	mdData, err := os.ReadFile(mdPath)
+	if err != nil || !strings.Contains(string(mdData), "# Bouclier Website Risk Assessment") {
+		t.Fatalf("step 6 invalid markdown export: %v", err)
+	}
+
+	// Step 7: Delete the scan
+	buf.Reset()
+	if err := RunHistoryDelete(ctx, cfg, HistoryDeleteOptions{ID: scanID, Yes: true}, &buf); err != nil {
+		t.Fatalf("step 7 delete error: %v", err)
+	}
+
+	// Step 8: Confirm both metadata and report are deleted
+	_, err = db2.GetScan(ctx, scanID)
+	if !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("step 8 expected ErrNotFound for scan record, got %v", err)
+	}
+	_, err = db2.GetScanReport(ctx, scanID)
+	if !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("step 8 expected ErrNotFound for scan report, got %v", err)
+	}
+	count, err = db2.CountScans(ctx, storage.ListFilter{})
+	if err != nil || count != 0 {
+		t.Fatalf("step 8 expected 0 scans, got %d", count)
+	}
+
+	// Step 9: Repeat persistence flow through TUI scan pipeline
+	tuiScanOpts := ScanOptions{
+		Target:  "https://tui-lifecycle.org",
+		Storage: db2,
+		NoCT:    true,
+	}
+	res, err := ExecuteScanPipeline(ctx, cfg, tuiScanOpts, nil)
+	if err != nil {
+		t.Fatalf("step 9 tui scan pipeline error: %v", err)
+	}
+	if res.ScanRecord == nil {
+		t.Fatal("step 9 expected non-nil ScanRecord from pipeline")
+	}
+
+	// Verify exactly 1 scan persisted from TUI flow
+	count, err = db2.CountScans(ctx, storage.ListFilter{})
+	if err != nil || count != 1 {
+		t.Fatalf("step 9 expected 1 scan from TUI flow, got %d", count)
+	}
+	tuiList, err := db2.ListScans(ctx, storage.ListFilter{})
+	if err != nil || len(tuiList) != 1 || !strings.Contains(tuiList[0].Target, "tui-lifecycle.org") {
+		t.Fatalf("step 9 unexpected tui scan record: %+v", tuiList)
+	}
+}
+
+func TestScanPipelineWithThreatIntelligence(t *testing.T) {
+	origAnalyzer := websiteAnalyzer
+	defer func() { websiteAnalyzer = origAnalyzer }()
+	websiteAnalyzer = func(ctx context.Context, input *heuristics.NormalizedURL, options webintel.Options) (*webintel.AnalysisResult, error) {
+		return &webintel.AnalysisResult{
+			RequestedURL:     input.Normalized,
+			FinalURL:         input.Normalized,
+			TLSStatus:        webintel.ComponentStatus{State: webintel.StateCompleted},
+			HTTPStatus:       webintel.ComponentStatus{State: webintel.StateCompleted},
+			RedirectsStatus:  webintel.ComponentStatus{State: webintel.StateCompleted},
+			HeadersStatus:    webintel.ComponentStatus{State: webintel.StateCompleted},
+			CookiesStatus:    webintel.ComponentStatus{State: webintel.StateCompleted},
+			CORSStatus:       webintel.ComponentStatus{State: webintel.StateCompleted},
+			HTMLStatus:       webintel.ComponentStatus{State: webintel.StateCompleted},
+			DisclosureStatus: webintel.ComponentStatus{State: webintel.StateCompleted},
+			AnalyzedAt:       time.Now().UTC(),
+			Complete:         true,
+		}, nil
+	}
+
+	repo, err := storage.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	ctx := context.Background()
+	_ = repo.RegisterSource(ctx, storage.IntelSource{
+		ID:           "test-feed",
+		Name:         "Security Intel Source",
+		ProviderType: "local_file",
+		Endpoint:     "/feed.json",
+		Enabled:      true,
+	})
+
+	now := time.Now().UTC()
+	future := now.Add(48 * time.Hour)
+	_, _, err = repo.SaveIndicatorBatch(ctx, "test-feed", []storage.IntelIndicator{
+		{
+			Type:       "domain",
+			Value:      "malicious-target.com",
+			Category:   "phishing",
+			Confidence: 95,
+			Severity:   "high",
+			ExpiresAt:  &future,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts := ScanOptions{
+		Target:  "https://malicious-target.com/login",
+		Storage: repo,
+		NoCT:    true,
+	}
+
+	res, err := ExecuteScanPipeline(ctx, config.Default(), opts, nil)
+	if err != nil {
+		t.Fatalf("scan pipeline error: %v", err)
+	}
+
+	if res.Assessment == nil {
+		t.Fatal("expected non-nil assessment")
+	}
+
+	// Verify threat intelligence coverage
+	if res.Assessment.Intelligence == nil {
+		t.Fatal("expected non-nil Intelligence coverage block in assessment")
+	}
+	if res.Assessment.Intelligence.MatchesCount != 1 {
+		t.Errorf("expected 1 match, got %d", res.Assessment.Intelligence.MatchesCount)
+	}
+	if !res.Assessment.Intelligence.Ran {
+		t.Errorf("expected Intelligence.Ran to be true")
+	}
+
+	// Verify finding generated
+	foundIntelFinding := false
+	for _, f := range res.Assessment.Findings {
+		if f.Code == intel.CodeIntelMaliciousDomain {
+			foundIntelFinding = true
+			if f.ScoreImpact <= 0 {
+				t.Errorf("expected positive score impact for intelligence finding, got %d", f.ScoreImpact)
+			}
+			break
+		}
+	}
+	if !foundIntelFinding {
+		t.Errorf("expected finding %s in assessment findings", intel.CodeIntelMaliciousDomain)
 	}
 }

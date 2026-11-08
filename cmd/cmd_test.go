@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -16,6 +18,8 @@ import (
 	"bouclier/internal/certanalysis"
 	"bouclier/internal/cli"
 	"bouclier/internal/heuristics"
+	"bouclier/internal/risk"
+	"bouclier/internal/storage"
 	"bouclier/internal/tlsintel"
 	"bouclier/internal/webintel"
 )
@@ -74,7 +78,7 @@ func TestRootCommandHelp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, expected := range []string{"bouclier", "tui", "scan", "serve", "version", "config", "Examples:"} {
+	for _, expected := range []string{"bouclier", "tui", "scan", "mcp", "serve", "version", "config", "Examples:"} {
 		if !strings.Contains(out, expected) {
 			t.Errorf("root help missing %q:\n%s", expected, out)
 		}
@@ -415,6 +419,254 @@ func TestScanCommandExecution(t *testing.T) {
 		}
 		if cli.ExitCode(err) != cli.ExitOutputError {
 			t.Fatalf("expected exit code %d (ExitOutputError), got %d (err: %v)", cli.ExitOutputError, cli.ExitCode(err), err)
+		}
+	})
+}
+
+func TestHistoryCommandHierarchy(t *testing.T) {
+	restore := mockWebsiteAnalyzer()
+	defer restore()
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "cobra_history.db")
+	cfgPath := filepath.Join(tmpDir, "config.json")
+
+	cfgJSON := fmt.Sprintf(`{
+		"application": {"name": "Bouclier", "version": "0.1.0-dev", "environment": "test"},
+		"storage": {"database_path": %q, "cache_ttl": "24h"}
+	}`, dbPath)
+	if err := os.WriteFile(cfgPath, []byte(cfgJSON), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Run a scan so history has an entry
+	_, err := executeCommand("scan", "https://history-target.org", "--config", cfgPath, "--no-ct")
+	if err != nil {
+		t.Fatalf("initial scan error: %v", err)
+	}
+
+	// 2. Help command
+	out, err := executeCommand("history", "--help")
+	if err != nil {
+		t.Fatalf("history --help error: %v", err)
+	}
+	if !strings.Contains(out, "history list") || !strings.Contains(out, "history show") || !strings.Contains(out, "history delete") {
+		t.Fatalf("unexpected history help output:\n%s", out)
+	}
+
+	// 3. history list terminal
+	out, err = executeCommand("history", "list", "--config", cfgPath, "--no-color")
+	if err != nil {
+		t.Fatalf("history list error: %v", err)
+	}
+	if !strings.Contains(out, "Scan History") || !strings.Contains(out, "history-target.org") {
+		t.Fatalf("expected scan in history list output:\n%s", out)
+	}
+
+	// 4. history list JSON
+	out, err = executeCommand("history", "list", "--config", cfgPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("history list json error: %v", err)
+	}
+	var listResp cli.HistoryListResponse
+	if err := json.Unmarshal([]byte(out), &listResp); err != nil {
+		t.Fatalf("failed to decode history list json: %v\nJSON:\n%s", err, out)
+	}
+	if listResp.Total != 1 || len(listResp.Items) != 1 {
+		t.Fatalf("expected 1 item, got total %d, items %d", listResp.Total, len(listResp.Items))
+	}
+	scanID := listResp.Items[0].ID
+
+	// 5. history show JSON
+	out, err = executeCommand("history", "show", scanID, "--config", cfgPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("history show json error: %v", err)
+	}
+	var decodedReport map[string]any
+	if err := json.Unmarshal([]byte(out), &decodedReport); err != nil {
+		t.Fatalf("failed to decode show json report: %v", err)
+	}
+	if decodedReport["schema_version"] != "bouclier-risk/v1" {
+		t.Fatalf("unexpected schema version: %v", decodedReport["schema_version"])
+	}
+
+	// 6. history show markdown
+	out, err = executeCommand("history", "show", scanID, "--config", cfgPath, "--format", "markdown")
+	if err != nil {
+		t.Fatalf("history show markdown error: %v", err)
+	}
+	if !strings.Contains(out, "# Bouclier Website Risk Assessment") {
+		t.Fatalf("unexpected markdown show output:\n%s", out)
+	}
+
+	// 7. history delete --yes
+	out, err = executeCommand("history", "delete", scanID, "--config", cfgPath, "--yes")
+	if err != nil {
+		t.Fatalf("history delete error: %v", err)
+	}
+	if !strings.Contains(out, "deleted") {
+		t.Fatalf("expected deleted message, got:\n%s", out)
+	}
+
+	// 8. Verify list is now empty
+	out, err = executeCommand("history", "list", "--config", cfgPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("history list after delete error: %v", err)
+	}
+	_ = json.Unmarshal([]byte(out), &listResp)
+	if listResp.Total != 0 {
+		t.Fatalf("expected 0 scans after deletion, got %d", listResp.Total)
+	}
+
+	// 9. history show missing arg returns error
+	_, err = executeCommand("history", "show")
+	if err == nil || cli.ExitCode(err) != cli.ExitInvalidUsage {
+		t.Fatalf("expected ExitInvalidUsage for show with no args, got %v", err)
+	}
+
+	// 10. history delete missing arg returns error
+	_, err = executeCommand("history", "delete")
+	if err == nil || cli.ExitCode(err) != cli.ExitInvalidUsage {
+		t.Fatalf("expected ExitInvalidUsage for delete with no args, got %v", err)
+	}
+}
+
+func TestHistoryListScoreFilterFlags(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "filter_flags.db")
+	cfgPath := filepath.Join(tmpDir, "config.json")
+
+	cfgJSON := fmt.Sprintf(`{
+		"storage": {"database_path": %q}
+	}`, dbPath)
+	if err := os.WriteFile(cfgPath, []byte(cfgJSON), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	repo, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	// Insert 3 records with scores 15, 50, 85
+	s1 := storage.ScanRecord{ID: "scan-low-15", Target: "https://site-15.org", OverallScore: 15, Classification: risk.RiskLow, StartedAt: time.Now().Add(-10 * time.Minute)}
+	s2 := storage.ScanRecord{ID: "scan-med-50", Target: "https://site-50.org", OverallScore: 50, Classification: risk.RiskElevated, StartedAt: time.Now().Add(-5 * time.Minute)}
+	s3 := storage.ScanRecord{ID: "scan-high-85", Target: "https://site-85.org", OverallScore: 85, Classification: risk.RiskCritical, StartedAt: time.Now()}
+	_ = repo.SaveScan(ctx, s1, nil)
+	_ = repo.SaveScan(ctx, s2, nil)
+	_ = repo.SaveScan(ctx, s3, nil)
+	_ = repo.Close()
+
+	// 1. Valid range matching scan-med-50 (inclusive boundary)
+	out, err := executeCommand("history", "list", "--config", cfgPath, "--min-score", "50", "--max-score", "85", "--format", "json")
+	if err != nil {
+		t.Fatalf("history list filter error: %v", err)
+	}
+	var resp cli.HistoryListResponse
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Total != 2 {
+		t.Fatalf("expected 2 scans between 50 and 85, got %d", resp.Total)
+	}
+
+	// 2. Exact boundary match min=50 max=50
+	out, err = executeCommand("history", "list", "--config", cfgPath, "--min-score", "50", "--max-score", "50", "--format", "json")
+	if err != nil {
+		t.Fatalf("history list exact boundary error: %v", err)
+	}
+	resp = cli.HistoryListResponse{}
+	_ = json.Unmarshal([]byte(out), &resp)
+	if resp.Total != 1 || resp.Items[0].ID != "scan-med-50" {
+		t.Fatalf("expected exactly scan-med-50, got: %+v", resp)
+	}
+
+	// 3. Rejection of negative min-score
+	_, err = executeCommand("history", "list", "--config", cfgPath, "--min-score", "-5")
+	if err == nil || cli.ExitCode(err) != cli.ExitInvalidUsage {
+		t.Fatalf("expected ExitInvalidUsage for negative min-score, got %v", err)
+	}
+
+	// 4. Rejection of max-score > 100
+	_, err = executeCommand("history", "list", "--config", cfgPath, "--max-score", "105")
+	if err == nil || cli.ExitCode(err) != cli.ExitInvalidUsage {
+		t.Fatalf("expected ExitInvalidUsage for max-score > 100, got %v", err)
+	}
+
+	// 5. Rejection when min-score > max-score
+	_, err = executeCommand("history", "list", "--config", cfgPath, "--min-score", "90", "--max-score", "20")
+	if err == nil || cli.ExitCode(err) != cli.ExitInvalidUsage {
+		t.Fatalf("expected ExitInvalidUsage when min > max, got %v", err)
+	}
+}
+
+func TestExecutableExitCodes(t *testing.T) {
+	binPath := filepath.Join(t.TempDir(), "bouclier-test.exe")
+	buildCmd := exec.Command("go", "build", "-o", binPath, "bouclier")
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to build test executable: %v\nOutput: %s", err, string(out))
+	}
+
+	t.Run("ssrf private loopback target exits with code 3", func(t *testing.T) {
+		cmd := exec.Command(binPath, "scan", "http://127.0.0.1")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatal("expected non-zero exit code for SSRF blocked target")
+		}
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			t.Fatalf("expected ExitError, got %v", err)
+		}
+		if exitErr.ExitCode() != 3 {
+			t.Fatalf("expected exit code 3 for SSRF blocked target, got %d. Output:\n%s", exitErr.ExitCode(), string(out))
+		}
+		if !strings.Contains(string(out), "blocked by SSRF protection") {
+			t.Fatalf("expected SSRF error explanation in output:\n%s", string(out))
+		}
+	})
+
+	t.Run("ssrf private rfc1918 target exits with code 3", func(t *testing.T) {
+		cmd := exec.Command(binPath, "scan", "http://10.0.0.1")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatal("expected non-zero exit code for SSRF blocked target")
+		}
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			t.Fatalf("expected ExitError, got %v", err)
+		}
+		if exitErr.ExitCode() != 3 {
+			t.Fatalf("expected exit code 3 for SSRF blocked target, got %d. Output:\n%s", exitErr.ExitCode(), string(out))
+		}
+	})
+
+	t.Run("invalid usage missing argument exits with code 2", func(t *testing.T) {
+		cmd := exec.Command(binPath, "scan")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatal("expected non-zero exit code for missing scan argument")
+		}
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			t.Fatalf("expected ExitError, got %v", err)
+		}
+		if exitErr.ExitCode() != 2 {
+			t.Fatalf("expected exit code 2 for invalid usage, got %d. Output:\n%s", exitErr.ExitCode(), string(out))
+		}
+	})
+
+	t.Run("invalid usage unsupported format exits with code 2", func(t *testing.T) {
+		cmd := exec.Command(binPath, "scan", "--format", "unsupported", "http://example.com")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatal("expected non-zero exit code for invalid format")
+		}
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			t.Fatalf("expected ExitError, got %v", err)
+		}
+		if exitErr.ExitCode() != 2 {
+			t.Fatalf("expected exit code 2 for invalid usage, got %d. Output:\n%s", exitErr.ExitCode(), string(out))
 		}
 	})
 }

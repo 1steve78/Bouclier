@@ -11,11 +11,14 @@ import (
 	"time"
 )
 
+const MaxRedirectsLimit = 20
+
 // Config contains the settings used by the Bouclier application.
 type Config struct {
 	Application ApplicationConfig `json:"application"`
 	HTTPServer  HTTPServerConfig  `json:"http_server"`
 	Scanner     ScannerConfig     `json:"scanner"`
+	AI          AIConfig          `json:"ai"`
 	Storage     StorageConfig     `json:"storage"`
 	ThreatIntel ThreatIntelConfig `json:"threat_intelligence"`
 	Logging     LoggingConfig     `json:"logging"`
@@ -29,6 +32,7 @@ type HTTPServerConfig struct {
 	ReadTimeout       time.Duration `json:"read_timeout"`
 	WriteTimeout      time.Duration `json:"write_timeout"`
 	IdleTimeout       time.Duration `json:"idle_timeout"`
+	MaxScanDuration   time.Duration `json:"max_scan_duration"`
 }
 
 type ApplicationConfig struct {
@@ -43,6 +47,18 @@ type ScannerConfig struct {
 	MaxRedirects        int           `json:"max_redirects"`
 	MaxConcurrentScans  int           `json:"max_concurrent_scans"`
 	UserAgent           string        `json:"user_agent"`
+}
+
+type AIConfig struct {
+	Enabled   bool          `json:"enabled"`
+	Ollama    OllamaConfig  `json:"ollama"`
+	Timeout   time.Duration `json:"timeout"`
+	MaxTokens int           `json:"max_tokens"`
+}
+
+type OllamaConfig struct {
+	BaseURL string `json:"base_url"`
+	Model   string `json:"model"`
 }
 
 type StorageConfig struct {
@@ -69,6 +85,7 @@ type jsonConfig struct {
 		ReadTimeout       string `json:"read_timeout"`
 		WriteTimeout      string `json:"write_timeout"`
 		IdleTimeout       string `json:"idle_timeout"`
+		MaxScanDuration   string `json:"max_scan_duration"`
 	} `json:"http_server"`
 	Scanner struct {
 		HTTPTimeout         string `json:"http_timeout"`
@@ -77,6 +94,15 @@ type jsonConfig struct {
 		MaxConcurrentScans  int    `json:"max_concurrent_scans"`
 		UserAgent           string `json:"user_agent"`
 	} `json:"scanner"`
+	AI struct {
+		Enabled bool `json:"enabled"`
+		Ollama  struct {
+			BaseURL string `json:"base_url"`
+			Model   string `json:"model"`
+		} `json:"ollama"`
+		Timeout   string `json:"timeout"`
+		MaxTokens int    `json:"max_tokens"`
+	} `json:"ai"`
 	Storage struct {
 		DatabasePath string `json:"database_path"`
 		CacheTTL     string `json:"cache_ttl"`
@@ -98,6 +124,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 			ReadTimeout       string `json:"read_timeout"`
 			WriteTimeout      string `json:"write_timeout"`
 			IdleTimeout       string `json:"idle_timeout"`
+			MaxScanDuration   string `json:"max_scan_duration"`
 		} `json:"http_server"`
 		Scanner struct {
 			HTTPTimeout         string `json:"http_timeout"`
@@ -106,6 +133,15 @@ func (c Config) MarshalJSON() ([]byte, error) {
 			MaxConcurrentScans  int    `json:"max_concurrent_scans"`
 			UserAgent           string `json:"user_agent"`
 		} `json:"scanner"`
+		AI struct {
+			Enabled bool `json:"enabled"`
+			Ollama  struct {
+				BaseURL string `json:"base_url"`
+				Model   string `json:"model"`
+			} `json:"ollama"`
+			Timeout   string `json:"timeout"`
+			MaxTokens int    `json:"max_tokens"`
+		} `json:"ai"`
 		Storage struct {
 			DatabasePath string `json:"database_path"`
 			CacheTTL     string `json:"cache_ttl"`
@@ -124,10 +160,12 @@ func (c Config) MarshalJSON() ([]byte, error) {
 			ReadTimeout       string `json:"read_timeout"`
 			WriteTimeout      string `json:"write_timeout"`
 			IdleTimeout       string `json:"idle_timeout"`
+			MaxScanDuration   string `json:"max_scan_duration"`
 		}{
 			c.HTTPServer.Host, c.HTTPServer.Port,
 			c.HTTPServer.ReadHeaderTimeout.String(), c.HTTPServer.ReadTimeout.String(),
 			c.HTTPServer.WriteTimeout.String(), c.HTTPServer.IdleTimeout.String(),
+			c.HTTPServer.MaxScanDuration.String(),
 		},
 		Scanner: struct {
 			HTTPTimeout         string `json:"http_timeout"`
@@ -136,6 +174,22 @@ func (c Config) MarshalJSON() ([]byte, error) {
 			MaxConcurrentScans  int    `json:"max_concurrent_scans"`
 			UserAgent           string `json:"user_agent"`
 		}{c.Scanner.HTTPTimeout.String(), c.Scanner.TLSHandshakeTimeout.String(), c.Scanner.MaxRedirects, c.Scanner.MaxConcurrentScans, c.Scanner.UserAgent},
+		AI: struct {
+			Enabled bool `json:"enabled"`
+			Ollama  struct {
+				BaseURL string `json:"base_url"`
+				Model   string `json:"model"`
+			} `json:"ollama"`
+			Timeout   string `json:"timeout"`
+			MaxTokens int    `json:"max_tokens"`
+		}{
+			Enabled: c.AI.Enabled,
+			Ollama: struct {
+				BaseURL string `json:"base_url"`
+				Model   string `json:"model"`
+			}{c.AI.Ollama.BaseURL, c.AI.Ollama.Model},
+			Timeout: c.AI.Timeout.String(), MaxTokens: c.AI.MaxTokens,
+		},
 		Storage: struct {
 			DatabasePath string `json:"database_path"`
 			CacheTTL     string `json:"cache_ttl"`
@@ -157,18 +211,25 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 		ReadTimeout       string `json:"read_timeout"`
 		WriteTimeout      string `json:"write_timeout"`
 		IdleTimeout       string `json:"idle_timeout"`
+		MaxScanDuration   string `json:"max_scan_duration"`
 	}{
 		Host: d.HTTPServer.Host, Port: d.HTTPServer.Port,
 		ReadHeaderTimeout: d.HTTPServer.ReadHeaderTimeout.String(),
 		ReadTimeout:       d.HTTPServer.ReadTimeout.String(),
 		WriteTimeout:      d.HTTPServer.WriteTimeout.String(),
 		IdleTimeout:       d.HTTPServer.IdleTimeout.String(),
+		MaxScanDuration:   d.HTTPServer.MaxScanDuration.String(),
 	}, Logging: d.Logging}
 	w.Scanner.HTTPTimeout = d.Scanner.HTTPTimeout.String()
 	w.Scanner.TLSHandshakeTimeout = d.Scanner.TLSHandshakeTimeout.String()
 	w.Scanner.MaxRedirects = d.Scanner.MaxRedirects
 	w.Scanner.MaxConcurrentScans = d.Scanner.MaxConcurrentScans
 	w.Scanner.UserAgent = d.Scanner.UserAgent
+	w.AI.Enabled = d.AI.Enabled
+	w.AI.Ollama.BaseURL = d.AI.Ollama.BaseURL
+	w.AI.Ollama.Model = d.AI.Ollama.Model
+	w.AI.Timeout = d.AI.Timeout.String()
+	w.AI.MaxTokens = d.AI.MaxTokens
 	w.Storage.DatabasePath = d.Storage.DatabasePath
 	w.Storage.CacheTTL = d.Storage.CacheTTL.String()
 	w.ThreatIntel.FeedUpdateInterval = d.ThreatIntel.FeedUpdateInterval.String()
@@ -211,6 +272,10 @@ func (w jsonConfig) toConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	aiTimeout, err := parse("ai.timeout", w.AI.Timeout)
+	if err != nil {
+		return nil, err
+	}
 	readHeaderTimeout, err := parse("http_server.read_header_timeout", w.HTTPServer.ReadHeaderTimeout)
 	if err != nil {
 		return nil, err
@@ -227,16 +292,26 @@ func (w jsonConfig) toConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	maxScanDuration, err := parse("http_server.max_scan_duration", w.HTTPServer.MaxScanDuration)
+	if err != nil {
+		return nil, err
+	}
 	return &Config{
 		Application: w.Application,
 		HTTPServer: HTTPServerConfig{
 			Host: w.HTTPServer.Host, Port: w.HTTPServer.Port,
 			ReadHeaderTimeout: readHeaderTimeout, ReadTimeout: readTimeout,
 			WriteTimeout: writeTimeout, IdleTimeout: idleTimeout,
+			MaxScanDuration: maxScanDuration,
 		},
 		Scanner: ScannerConfig{HTTPTimeout: httpTimeout, TLSHandshakeTimeout: tlsTimeout,
 			MaxRedirects: w.Scanner.MaxRedirects, MaxConcurrentScans: w.Scanner.MaxConcurrentScans,
 			UserAgent: w.Scanner.UserAgent},
+		AI: AIConfig{
+			Enabled: w.AI.Enabled,
+			Ollama:  OllamaConfig{BaseURL: w.AI.Ollama.BaseURL, Model: w.AI.Ollama.Model},
+			Timeout: aiTimeout, MaxTokens: w.AI.MaxTokens,
+		},
 		Storage:     StorageConfig{DatabasePath: w.Storage.DatabasePath, CacheTTL: cacheTTL},
 		ThreatIntel: ThreatIntelConfig{FeedUpdateInterval: feedInterval, FeedURLs: w.ThreatIntel.FeedURLs},
 		Logging:     w.Logging,
@@ -257,11 +332,17 @@ func Load(path string) (*Config, error) {
 	return config, nil
 }
 
+// MaxConfigFileBytes is the maximum allowed size for a configuration file (1 MiB).
+const MaxConfigFileBytes = 1 << 20
+
 // LoadFromReader reads, parses, and validates a JSON configuration.
 func LoadFromReader(reader io.Reader) (*Config, error) {
-	data, err := io.ReadAll(reader)
+	data, err := io.ReadAll(io.LimitReader(reader, MaxConfigFileBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read configuration: %w", err)
+	}
+	if len(data) > MaxConfigFileBytes {
+		return nil, fmt.Errorf("configuration file exceeds maximum allowed size of %d bytes", MaxConfigFileBytes)
 	}
 	config := Default()
 	if err := json.Unmarshal(data, config); err != nil {
@@ -281,14 +362,31 @@ func (c *Config) Validate() error {
 	if c.Scanner.HTTPTimeout <= 0 {
 		return fmt.Errorf("scanner.http_timeout must be positive")
 	}
+	if c.HTTPServer.MaxScanDuration <= 0 {
+		return fmt.Errorf("http_server.max_scan_duration must be positive")
+	}
 	if c.Scanner.TLSHandshakeTimeout <= 0 {
 		return fmt.Errorf("scanner.tls_handshake_timeout must be positive")
 	}
-	if c.Scanner.MaxRedirects < 0 {
-		return fmt.Errorf("scanner.max_redirects cannot be negative")
+	if c.Scanner.MaxRedirects < 0 || c.Scanner.MaxRedirects > MaxRedirectsLimit {
+		return fmt.Errorf("scanner.max_redirects must be between 0 and %d", MaxRedirectsLimit)
 	}
 	if c.Scanner.MaxConcurrentScans <= 0 {
 		return fmt.Errorf("scanner.max_concurrent_scans must be positive")
+	}
+	if c.AI.Timeout <= 0 {
+		return fmt.Errorf("ai.timeout must be positive")
+	}
+	if c.AI.MaxTokens < 1 || c.AI.MaxTokens > 8192 {
+		return fmt.Errorf("ai.max_tokens must be between 1 and 8192")
+	}
+	if c.AI.Enabled {
+		if strings.TrimSpace(c.AI.Ollama.BaseURL) == "" {
+			return fmt.Errorf("ai.ollama.base_url cannot be empty when AI is enabled")
+		}
+		if strings.TrimSpace(c.AI.Ollama.Model) == "" {
+			return fmt.Errorf("ai.ollama.model cannot be empty when AI is enabled")
+		}
 	}
 	if strings.TrimSpace(c.Scanner.UserAgent) == "" {
 		return fmt.Errorf("scanner.user_agent cannot be empty")
@@ -310,16 +408,20 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Validate checks HTTP server settings, including preventing wildcard binds.
+// Validate checks HTTP server settings, including restricting binds to loopback IPs.
 func (c HTTPServerConfig) Validate() error {
 	if strings.TrimSpace(c.Host) == "" {
 		return fmt.Errorf("http_server.host cannot be empty")
 	}
-	if ip := net.ParseIP(c.Host); ip != nil && ip.IsUnspecified() {
+	ip := net.ParseIP(c.Host)
+	if ip != nil && ip.IsUnspecified() {
 		return fmt.Errorf("http_server.host cannot be an unspecified address")
 	}
 	if strings.EqualFold(c.Host, "0.0.0.0") || strings.EqualFold(c.Host, "::") {
 		return fmt.Errorf("http_server.host cannot be an unspecified address")
+	}
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("http_server.host must be a loopback IP address")
 	}
 	if c.Port < 1 || c.Port > 65535 {
 		return fmt.Errorf("http_server.port must be between 1 and 65535")
@@ -335,6 +437,12 @@ func (c HTTPServerConfig) Validate() error {
 	}
 	if c.IdleTimeout <= 0 {
 		return fmt.Errorf("http_server.idle_timeout must be positive")
+	}
+	if c.MaxScanDuration <= 0 {
+		return fmt.Errorf("http_server.max_scan_duration must be positive")
+	}
+	if c.MaxScanDuration >= c.WriteTimeout {
+		return fmt.Errorf("http_server.max_scan_duration must be less than write_timeout")
 	}
 	return nil
 }

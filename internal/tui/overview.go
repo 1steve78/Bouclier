@@ -8,15 +8,23 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+type AIExplanationState struct {
+	Enabled bool
+	Loading bool
+	Text    string
+	Model   string
+	Err     error
+}
+
 // RenderOverview renders the post-scan assessment overview screen.
-func RenderOverview(styles Styles, assessment *risk.RiskAssessment, width int) string {
+func RenderOverview(styles Styles, assessment *risk.RiskAssessment, width int, aiStates ...AIExplanationState) string {
 	if assessment == nil {
 		return styles.Muted.Render("No active assessment to display.")
 	}
 
-	contentWidth := width - 4
-	if contentWidth < 45 {
-		contentWidth = 45
+	contentWidth := width - 6
+	if contentWidth < 30 {
+		contentWidth = 30
 	}
 	if contentWidth > 88 {
 		contentWidth = 88
@@ -43,11 +51,21 @@ func RenderOverview(styles Styles, assessment *risk.RiskAssessment, width int) s
 
 	sevSummary := renderSeverityCounts(styles, assessment)
 
-	topBlock := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		styles.Card.Width((contentWidth/2)-1).Render(styles.CardTitle.Render("Risk Score")+"\n\n"+scoreBox+"\n\n"+styles.Muted.Render("Relative product indicator (0–100), not a probability.")),
-		styles.Card.Width((contentWidth/2)-1).Render(styles.CardTitle.Render("Finding Counts")+"\n\n"+sevSummary),
-	)
+	var topBlock string
+	if contentWidth < 60 {
+		topBlock = lipgloss.JoinVertical(
+			lipgloss.Left,
+			styles.Card.Width(contentWidth).Render(styles.CardTitle.Render("Risk Score")+"\n\n"+scoreBox+"\n\n"+styles.Muted.Render("Relative product indicator (0–100), not a probability.")),
+			styles.Card.Width(contentWidth).Render(styles.CardTitle.Render("Finding Counts")+"\n\n"+sevSummary),
+		)
+	} else {
+		halfWidth := (contentWidth / 2) - 3
+		topBlock = lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			styles.Card.Width(halfWidth).Render(styles.CardTitle.Render("Risk Score")+"\n\n"+scoreBox+"\n\n"+styles.Muted.Render("Relative product indicator (0–100), not a probability.")),
+			styles.Card.Width(halfWidth).Render(styles.CardTitle.Render("Finding Counts")+"\n\n"+sevSummary),
+		)
+	}
 	b.WriteString(topBlock)
 	b.WriteString("\n\n")
 
@@ -101,15 +119,43 @@ func RenderOverview(styles Styles, assessment *risk.RiskAssessment, width int) s
 	b.WriteString(styles.Card.Width(contentWidth).Render(covSummary.String()))
 	b.WriteString("\n\n")
 
+	var aiState AIExplanationState
+	if len(aiStates) > 0 {
+		aiState = aiStates[0]
+	}
+	if aiState.Enabled {
+		var explanation strings.Builder
+		explanation.WriteString(styles.CardTitle.Render("AI-generated explanation (assessment remains authoritative)") + "\n\n")
+		switch {
+		case aiState.Loading:
+			explanation.WriteString(styles.Muted.Render("Requesting an explanation from the configured local Ollama model..."))
+		case aiState.Err != nil:
+			explanation.WriteString(styles.StageFailed.Render("Explanation failed: " + aiState.Err.Error()))
+		case aiState.Text != "":
+			if aiState.Model != "" {
+				explanation.WriteString(styles.Muted.Render("Model: "+aiState.Model) + "\n\n")
+			}
+			explanation.WriteString(wrapText(aiState.Text, contentWidth-8))
+		default:
+			explanation.WriteString(styles.Muted.Render("Press [A] to select an installed local Ollama model and explain this assessment."))
+		}
+		b.WriteString(styles.Card.Width(contentWidth).Render(explanation.String()))
+		b.WriteString("\n\n")
+	}
+
 	// Navigation Keybar
-	b.WriteString(styles.FormatKeybar([][2]string{
+	keybar := [][2]string{
 		{"F / Enter", "View Findings"},
 		{"C", "Coverage & Limitations"},
 		{"E", "Export Report"},
 		{"N", "New Scan"},
 		{"?", "Help"},
 		{"Q", "Quit"},
-	}))
+	}
+	if aiState.Enabled {
+		keybar = append(keybar, [2]string{"A", "Explain with local AI"})
+	}
+	b.WriteString(styles.FormatKeybar(keybar))
 
 	return b.String()
 }

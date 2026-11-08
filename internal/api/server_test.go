@@ -201,6 +201,17 @@ func TestServeRejectsMissingInputs(t *testing.T) {
 	}
 }
 
+func TestServeRejectsNonLoopbackListener(t *testing.T) {
+	server, err := NewServer(testHTTPConfig(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener := testListener{addr: &net.TCPAddr{IP: net.IPv4zero, Port: 8081}}
+	if err := Serve(context.Background(), server, listener, nil); err == nil {
+		t.Fatal("Serve() accepted a non-loopback listener")
+	}
+}
+
 func TestServeReturnsUnexpectedListenerError(t *testing.T) {
 	server, err := NewServer(testHTTPConfig(), nil)
 	if err != nil {
@@ -216,4 +227,20 @@ func TestServeReturnsUnexpectedListenerError(t *testing.T) {
 	if err := Serve(context.Background(), server, listener, nil); err == nil {
 		t.Fatal("Serve() succeeded with a closed listener")
 	}
+}
+
+type testListener struct {
+	addr net.Addr
+}
+
+func (l testListener) Accept() (net.Conn, error) {
+	return nil, net.ErrClosed
+}
+
+func (l testListener) Close() error {
+	return nil
+}
+
+func (l testListener) Addr() net.Addr {
+	return l.addr
 }

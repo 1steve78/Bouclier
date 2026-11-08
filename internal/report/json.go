@@ -52,6 +52,11 @@ func sanitizeAssessment(source *risk.RiskAssessment) *risk.RiskAssessment {
 		age.Explanation = redact(age.Explanation)
 		copy.RegistrationAge = &age
 	}
+	if source.Intelligence != nil {
+		intel := *source.Intelligence
+		intel.Detail = redact(intel.Detail)
+		copy.Intelligence = &intel
+	}
 	sort.Slice(copy.Findings, func(i, j int) bool { return findingLess(copy.Findings[i], copy.Findings[j]) })
 	sort.Slice(copy.ExcludedFindings, func(i, j int) bool { return findingLess(copy.ExcludedFindings[i], copy.ExcludedFindings[j]) })
 	sort.Slice(copy.SeverityCounts, func(i, j int) bool {

@@ -13,6 +13,11 @@ import (
 	"golang.org/x/net/idna"
 )
 
+const (
+	// MaxURLLength is the maximum allowed URL input length (RFC 7230 / practical web limit).
+	MaxURLLength = 8192
+)
+
 var errMalformedURL = errors.New("malformed URL syntax")
 
 // NormalizedURL contains the parsed URL components used by future analysis.
@@ -41,6 +46,9 @@ func NormalizeURL(raw string) (*NormalizedURL, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, fmt.Errorf("validate URL: input is empty")
 	}
+	if len(raw) > MaxURLLength {
+		return nil, fmt.Errorf("validate URL: input exceeds maximum length of %d bytes", MaxURLLength)
+	}
 	for _, r := range raw {
 		if unicode.IsControl(r) {
 			return nil, fmt.Errorf("validate URL: control characters are not allowed")
@@ -51,6 +59,20 @@ func NormalizeURL(raw string) (*NormalizedURL, error) {
 	}
 	if strings.ContainsRune(raw, '\\') {
 		return nil, fmt.Errorf("validate URL: backslashes are not allowed")
+	}
+
+	rawAuthority := raw
+	if idx := strings.Index(rawAuthority, "://"); idx >= 0 {
+		rawAuthority = rawAuthority[idx+3:]
+	}
+	if idx := strings.IndexAny(rawAuthority, "/?#"); idx >= 0 {
+		rawAuthority = rawAuthority[:idx]
+	}
+	if at := strings.LastIndexByte(rawAuthority, '@'); at >= 0 {
+		rawAuthority = rawAuthority[at+1:]
+	}
+	if !strings.HasPrefix(rawAuthority, "[") && strings.Count(rawAuthority, ":") > 1 {
+		return nil, fmt.Errorf("validate authority: IPv6 addresses must be bracketed")
 	}
 
 	parsed, err := url.Parse(raw)

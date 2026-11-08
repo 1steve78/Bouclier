@@ -69,7 +69,9 @@ func TestInspectConnectionRejectsInvalidInput(t *testing.T) {
 func TestInspectConnectionRejectsUnsafeIPAddresses(t *testing.T) {
 	for _, raw := range []string{
 		"127.0.0.1", "10.0.0.1", "172.16.1.1", "192.168.1.1", "169.254.1.1", "0.0.0.0",
-		"224.0.0.1", "::1", "fc00::1", "fe80::1", "ff02::1", "::", "::ffff:127.0.0.1",
+		"169.254.169.254", "100.100.100.200", "224.0.0.1", "::1", "::8.8.8.8",
+		"fc00::1", "fe80::1", "ff02::1", "::", "::ffff:127.0.0.1",
+		"64:ff9b::808:808", "2001::1", "2001:db8::1", "2002:0808:0808::1",
 	} {
 		t.Run(raw, func(t *testing.T) {
 			addr := netip.MustParseAddr(raw)
@@ -219,6 +221,46 @@ func TestInspectConnectionSuccessfulLocalTLS(t *testing.T) {
 	}
 	if resolver.calls != 1 {
 		t.Errorf("resolver calls = %d, want exactly one", resolver.calls)
+	}
+}
+
+func TestInspectConnectionRejectsDNSRebindingBeforeProhibitedDial(t *testing.T) {
+	answers := [][]netip.Addr{
+		{netip.MustParseAddr("8.8.8.8")},
+		{netip.MustParseAddr("169.254.169.254")},
+	}
+	lookups := 0
+	resolver := resolverFunc(func(ctx context.Context, _, _ string) ([]netip.Addr, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if lookups >= len(answers) {
+			return nil, errors.New("unexpected DNS lookup")
+		}
+		answer := answers[lookups]
+		lookups++
+		return append([]netip.Addr(nil), answer...), nil
+	})
+	var dialed []string
+	deps := inspectDependencies{
+		resolver: resolver,
+		dial: func(_ context.Context, _, address string) (net.Conn, error) {
+			dialed = append(dialed, address)
+			if address != "8.8.8.8:443" {
+				return nil, errors.New("attempted to dial an unvalidated destination")
+			}
+			return nil, errors.New("stopped after observing validated public destination")
+		},
+	}
+	if _, err := inspectConnection(context.Background(), "target.com", testConfig(), deps); err == nil || !strings.Contains(err.Error(), "validated public destination") {
+		t.Fatalf("initial public destination error=%v; want controlled dial stop", err)
+	}
+	result, err := inspectConnection(context.Background(), "target.com", testConfig(), deps)
+	if err == nil || result != nil || !strings.Contains(err.Error(), "prohibited address") {
+		t.Fatalf("rebinding result=%+v err=%v; want prohibited DNS answer rejection", result, err)
+	}
+	if lookups != 2 || len(dialed) != 1 || dialed[0] != "8.8.8.8:443" {
+		t.Fatalf("lookups=%d dial destinations=%v; want two lookups and only the initial public dial", lookups, dialed)
 	}
 }
 

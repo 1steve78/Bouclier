@@ -87,3 +87,34 @@ func TestInvalidLogLevel(t *testing.T) {
 		t.Fatalf("New() error = %v, want descriptive unsupported-level error", err)
 	}
 }
+
+func TestSensitiveDataRedactedInLogs(t *testing.T) {
+	var output bytes.Buffer
+	logger, err := New(config.LoggingConfig{Level: "debug", Structured: true}, &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	secretToken := "secret-api-token-987654"
+	passwordVal := "SuperSecretPassword123"
+
+	logger.Debug("performing authentication",
+		"auth_header", "Bearer "+secretToken,
+		"password", passwordVal,
+		"target_url", "https://admin:pass123@example.com/api?token="+secretToken,
+	)
+
+	out := output.String()
+	if strings.Contains(out, secretToken) {
+		t.Errorf("SECURITY LEAK: secret token leaked in log: %s", out)
+	}
+	if strings.Contains(out, passwordVal) {
+		t.Errorf("SECURITY LEAK: password leaked in log: %s", out)
+	}
+	if strings.Contains(out, "admin:pass123@") {
+		t.Errorf("SECURITY LEAK: embedded userinfo leaked in log: %s", out)
+	}
+	if !strings.Contains(out, "[redacted]") {
+		t.Errorf("expected [redacted] indicator in log: %s", out)
+	}
+}

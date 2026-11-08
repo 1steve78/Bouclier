@@ -17,12 +17,18 @@ type ErrorDetail struct {
 }
 
 const (
-	ErrorCodeInvalidRequest   = "invalid_request"
-	ErrorCodeRequestTooLarge  = "request_too_large"
-	ErrorCodeNotFound         = "not_found"
-	ErrorCodeMethodNotAllowed = "method_not_allowed"
-	ErrorCodeConflict         = "conflict"
-	ErrorCodeInternal         = "internal_error"
+	ErrorCodeInvalidRequest     = "invalid_request"
+	ErrorCodeRequestTooLarge    = "request_too_large"
+	ErrorCodeNotFound           = "not_found"
+	ErrorCodeMethodNotAllowed   = "method_not_allowed"
+	ErrorCodeConflict           = "conflict"
+	ErrorCodeInvalidTarget      = "invalid_target"
+	ErrorCodeDestinationBlocked = "destination_not_allowed"
+	ErrorCodeScanTimeout        = "scan_timeout"
+	ErrorCodeScanCanceled       = "scan_canceled"
+	ErrorCodeScanCapacity       = "scan_capacity_exhausted"
+	ErrorCodeServiceUnavailable = "scan_service_unavailable"
+	ErrorCodeInternal           = "internal_error"
 )
 
 // HealthResponse reports process liveness.

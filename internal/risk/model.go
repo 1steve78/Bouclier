@@ -126,6 +126,19 @@ type ComponentCoverage struct {
 	Detail    string         `json:"detail,omitempty"`
 }
 
+// IntelligenceCoverage summarizes threat intelligence evaluation during a scan.
+type IntelligenceCoverage struct {
+	Ran                  bool       `json:"ran"`
+	SourcesConfigured    int        `json:"sources_configured"`
+	SourcesEnabled       int        `json:"sources_enabled"`
+	LastSuccessfulSync   *time.Time `json:"last_successful_sync,omitempty"`
+	IndicatorsConsidered int        `json:"indicators_considered"`
+	MatchesCount         int        `json:"matches_count"`
+	DatabaseStale        bool       `json:"database_stale"`
+	DatabaseUnavailable  bool       `json:"database_unavailable"`
+	Detail               string     `json:"detail,omitempty"`
+}
+
 // RiskAssessment is an explainable, deterministic assessment, never a
 // probability that a site is malicious.
 type RiskAssessment struct {
@@ -144,6 +157,7 @@ type RiskAssessment struct {
 	UnclassifiedCount     int                       `json:"unclassified_count"`
 	AnalysisCoverage      []ComponentCoverage       `json:"analysis_coverage"`
 	RegistrationAge       *registration.AgeAnalysis `json:"registration_age,omitempty"`
+	Intelligence          *IntelligenceCoverage     `json:"intelligence,omitempty"`
 	Limitations           []string                  `json:"limitations"`
 	ScoringMethod         string                    `json:"scoring_method"`
 }

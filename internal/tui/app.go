@@ -7,6 +7,7 @@ import (
 
 	"bouclier/internal/cli"
 	"bouclier/internal/config"
+	"bouclier/internal/storage"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
 )
@@ -33,7 +34,21 @@ func Run(cfg *config.Config, opts Options) error {
 		}
 	}
 
-	model := NewModel(cfg, opts.NoColor)
+	noColor := opts.NoColor || os.Getenv("NO_COLOR") != ""
+	var repo storage.Repository
+	var storageErr error
+	if cfg != nil && cfg.Storage.DatabasePath != "" {
+		r, err := storage.Open(cfg.Storage.DatabasePath)
+		if err == nil {
+			repo = r
+			defer repo.Close()
+		} else {
+			storageErr = err
+		}
+	}
+
+	model := NewModelWithStorage(cfg, noColor, repo)
+	model.StorageErr = storageErr
 	p := tea.NewProgram(
 		model,
 		tea.WithAltScreen(),

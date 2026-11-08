@@ -4,15 +4,17 @@ Bouclier is a Go-based command-line security tool for phishing detection, domain
 
 ## Key Capabilities
 
-- **Interactive Terminal UI**: Full-screen Bubble Tea terminal interface (`bouclier tui`) with live stage checklist, asynchronous scan execution, finding inspector, and keyboard navigation.
+- **Interactive Terminal UI**: Full-screen Bubble Tea terminal interface (`bouclier tui`) with live stage checklist, asynchronous scan execution, finding inspector, scan history browsing, keyboard navigation, and optional local Ollama explanations.
 - **Single-command scanning**: Run comprehensive multi-vector assessments with `bouclier scan <url>`.
+- **Collaborative Threat Intelligence**: Local-first malicious indicator matching (domains, URLs, IPv4, IPv6) without external lookup during scans, secure bounded feed synchronization, and cryptographic bundle import/export (`bouclier-intel-bundle/v1`) with zero background telemetry.
+- **Persistent Scan History**: Local pure-Go SQLite persistence (`modernc.org/sqlite`) retaining scans across application restarts. Browse, inspect, export, and manage history via `bouclier history` and the interactive TUI.
 - **URL & Domain Heuristics**: Evaluates homograph/IDN spoofing, entropy, suspicious top-level domains, IP-as-host, deep subdomains, and credential indicators.
 - **TLS Intelligence**: Inspects certificate validity, key strength, issuer trust, signature algorithms, expiration windows, and optional Certificate Transparency (CT) logs.
 - **Passive HTTP Security Assessment**: Analyzes HTTP security response headers (HSTS, CSP, X-Frame-Options, etc.), cookie security flags (`Secure`, `HttpOnly`, `SameSite`), and safe redirect sequences.
 - **Unified Deterministic Risk Scoring**: Aggregates normalized findings using the `bouclier-default` policy into an overall score (0–100) and clear classification (`clean`, `low`, `medium`, `high`, `critical`).
 - **Flexible Export Formats**: Human-readable terminal output (with ANSI color, quiet, and verbose modes), structured machine-readable JSON (`bouclier-risk/v1`), and clean Markdown reports.
 - **CI/CD Integration**: Supports deterministic exit codes and a `--fail-on-risk` threshold flag to gate deployment pipelines.
-- **Built-in Safety**: Enforces strict SSRF mitigations, IP address pinning, private network blocks, credential scrubbing, and secure file creation permissions (`0600`).
+- **Built-in Safety & Privacy**: Enforces strict SSRF mitigations, IP address pinning, private network blocks, credential scrubbing, and secure file creation permissions (`0600`). Never stores credentials, tokens, or raw HTTP bodies in persistence.
 
 ---
 
@@ -53,6 +55,15 @@ bouclier tui [flags]
 
 Launches Bouclier's interactive Bubble Tea terminal user interface.
 
+Features:
+- **Welcome Dashboard**: Displays live capabilities overview and persistent recent scans loaded directly from the SQLite database.
+- **Scan History Explorer (`[ H ]`)**: Browse stored scan assessments with pagination (`[` / `]`), select any past scan with arrow keys (`↑`/`↓` or `j`/`k`), and press `[ Enter ]` to open the full risk report without rescanning. Permanently delete records with `[ D ]` (includes interactive confirmation).
+- **Live Scanning (`[ Enter / S ]`)**: Enter a target URL and observe asynchronous stage-by-stage progress with live elapsed timing and cancel anytime (`[ Esc ]` or `[ C ]`).
+- **Risk Assessment Overview**: Comprehensive risk score dial, classification badge, and severity summary.
+- **Finding Explorer (`[ F ]`)**: Filter findings by severity (`[ 1 ]`–`[ 6 ]` or `[ Tab ]`), inspect detailed remediation advice and evidence (`[ Enter ]`).
+- **Coverage & Methodology (`[ C ]` / `[ ? ]`)**: Review component execution states and audit limitations.
+- **Exporting (`[ E ]`)**: Export canonical JSON or Markdown reports directly to disk.
+
 Options:
 - `--no-color`: Disable ANSI color sequences in the interactive interface.
 - `--config <path>`: Load application configuration from the specified JSON file.
@@ -71,7 +82,105 @@ Displays global options, available subcommands, and usage examples.
 bouclier scan <url> [flags]
 ```
 
-Performs an end-to-end security assessment against the specified target URL.
+Performs an end-to-end security assessment against the specified target URL. Upon completion, the assessment and sanitized report are automatically persisted to the local SQLite database.
+
+### Managing Scan History
+
+```bash
+bouclier history [command] [flags]
+```
+
+Inspect and manage historical scan assessments stored in the local SQLite database (`~/.bouclier/bouclier.db`). Allows browsing past scans, viewing full risk reports in multiple formats without repeating network scans, and removing records.
+
+#### 1. Listing Scan History
+
+```bash
+# List recent scans (default limit: 20)
+bouclier history list
+
+# Filter by target domain substring
+bouclier history list --target example.com
+
+# Filter by risk classification
+bouclier history list --classification critical
+
+# Filter by scan status and paginate
+bouclier history list --status completed --limit 10 --offset 20
+
+# Output as structured JSON
+bouclier history list --format json
+```
+
+Flags:
+- `--limit <n>`: Maximum number of scan records to return (default: 20, max: 100).
+- `--offset <n>`: Number of records to skip for pagination (default: 0).
+- `--target <str>`: Filter records by target domain or URL substring.
+- `--classification <class>`: Filter by risk classification (`low`, `guarded`, `elevated`, `high`, `critical`).
+- `--status <status>`: Filter by execution status (`completed`, `partial`, `failed`, `cancelled`).
+- `--format <fmt>`: Output format (`table` or `json`, default: `table`).
+
+#### 2. Viewing a Historical Assessment
+
+```bash
+# View terminal summary for a scan (accepts 8-character prefix or full UUID)
+bouclier history show 7a9b2c3d
+
+# Export historical assessment to Markdown
+bouclier history show 7a9b2c3d --format markdown --output report.md
+
+# Output full canonical JSON (bouclier-risk/v1) to stdout
+bouclier history show 7a9b2c3d --format json
+```
+
+Flags:
+- `--format <fmt>`: Report format (`terminal`, `json`, or `markdown`, default: `terminal`).
+- `--output <path>`: Write report to file path instead of stdout (permissions `0600`).
+- `--quiet`: Minimal summary output.
+- `--verbose`: Include all technical findings regardless of severity.
+- `--no-color`: Disable ANSI color highlighting.
+
+#### 3. Deleting a Historical Scan
+
+```bash
+# Delete with interactive confirmation
+bouclier history delete 7a9b2c3d
+
+# Delete without prompting
+bouclier history delete 7a9b2c3d --yes
+```
+
+Flags:
+- `-y`, `--yes`: Skip confirmation prompt.
+
+### Threat Intelligence & IOC Management
+
+Manage local threat intelligence feeds, synchronize indicators, search malicious indicators, and import/export collaborative bundles:
+
+```bash
+# Display threat intelligence health and metrics
+bouclier intel status
+
+# List configured intelligence sources
+bouclier intel sources
+
+# Synchronize enabled feeds or a specific feed
+bouclier intel update
+bouclier intel update feed-1
+
+# Search indicators locally (matches exact values, domains, IPs, categories)
+bouclier intel search evil-domain.com
+
+# Import indicators from a verified bundle or raw JSON/CSV file
+bouclier intel import bundle.json
+bouclier intel import feed.csv --source-id custom-csv
+
+# Export local indicators to a collaborative bundle with SHA-256 integrity check
+bouclier intel export shared_bundle.json --category phishing --min-confidence 80
+
+# Prune expired indicators
+bouclier intel prune --dry-run
+bouclier intel prune
+```
 
 ### Displaying Version
 
@@ -95,22 +204,23 @@ Prints the effective runtime configuration in formatted JSON, masking any sensit
 bouclier serve
 ```
 
-The initial server binds to `127.0.0.1:8081` and shuts down gracefully when interrupted. Override the host or port with flags, or configure them in the JSON file selected by `--config`:
+The server binds to `127.0.0.1:8081` by default and shuts down gracefully when interrupted. Because the scan endpoint does not require authentication, the server only accepts literal loopback IP addresses (`127.0.0.0/8` or `::1`). Override the loopback host or port with flags, or configure them in the JSON file selected by `--config`:
 
 ```bash
 bouclier serve --host 127.0.0.1 --port 8081
 bouclier --config configs/config.json serve
 ```
 
-The `http_server` configuration section accepts `host`, `port`, `read_header_timeout`, `read_timeout`, `write_timeout`, and `idle_timeout` (duration values use Go duration syntax such as `"5s"`). Defaults are `127.0.0.1`, `8081`, `5s`, `15s`, `30s`, and `60s`, respectively. Wildcard bind addresses are rejected.
+The `http_server` configuration section accepts `host`, `port`, `read_header_timeout`, `read_timeout`, `write_timeout`, `idle_timeout`, and `max_scan_duration` (duration values use Go duration syntax such as `"5s"`). Defaults are `127.0.0.1`, `8081`, `5s`, `15s`, `30s`, `60s`, and `20s`, respectively. The write timeout must exceed the maximum scan duration. Non-loopback IPs, hostnames, and wildcard bind addresses are rejected. The maximum number of concurrent scans is configured with `scanner.max_concurrent_scans` (default `10`).
 
-Only these initial endpoints are available:
+Available endpoints:
 
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/health` | Process liveness |
 | `GET` | `/ready` | API initialization readiness |
 | `GET` | `/api/v1` | API name and version metadata |
+| `POST` | `/api/v1/scans` | Synchronously assess a URL and return a `bouclier-risk/v1` report |
 
 Example requests:
 
@@ -118,9 +228,12 @@ Example requests:
 curl http://127.0.0.1:8081/health
 curl http://127.0.0.1:8081/ready
 curl http://127.0.0.1:8081/api/v1
+curl -X POST http://127.0.0.1:8081/api/v1/scans \
+  -H "Content-Type: application/json" \
+  -d '{"target_url":"https://example.com"}'
 ```
 
-For request/response conventions, error codes, and the canonical report schema reference, see [API Contracts](docs/api-contracts.md).
+Scans are synchronous, capped at 20 seconds by default, and bounded by the configured concurrent scan limit. Unsafe/private destinations are rejected. For request/response conventions, error codes, timeout behavior, and the canonical report schema reference, see [API Contracts](docs/api-contracts.md).
 
 ---
 
@@ -260,14 +373,41 @@ bouclier tui
 | `c` | Cancel active scan / view coverage from overview |
 | `f` | View findings explorer from overview |
 | `e` | Open report export dialog |
+| `a` | Request an explanation from local Ollama on the assessment overview (when enabled) |
 | `n` / `s` | Start a new website scan |
 | `ctrl+c` | Safe force exit |
+
+### Local Ollama Explanations
+
+AI explanations are disabled by default and do not alter the deterministic score or saved assessment. To enable them, install/start Ollama and pull a model:
+
+```bash
+ollama serve
+ollama pull llama3.2
+```
+
+In the Bouclier JSON config, set:
+
+```json
+"ai": {
+  "enabled": true,
+  "ollama": {
+    "base_url": "http://127.0.0.1:11434",
+    "model": "llama3.2"
+  },
+  "timeout": "90s",
+  "max_tokens": 512
+}
+```
+
+Then launch `bouclier --config <path-to-config.json> tui`, run a scan, and press `a` on its assessment overview. Bouclier runs `ollama list` to show installed models. Select one with the arrow keys and press Enter to generate the explanation. The selected model is used for the current TUI session and is not written back to the config file. Bouclier sends a sanitized summary of the score, findings, and coverage to the local Ollama service; it does not send raw response bodies. The configured Ollama URL must use a loopback host. Ollama must be installed and available on `PATH`.
 
 ### Terminal Requirements & Adaptability
 
 - Requires an interactive terminal (stdin and stdout connected to a terminal). Running in non-interactive pipelines outputs an informative error directing users to `bouclier scan <url>`.
 - Responsive layout handles standard 80x24 terminals, wide displays, and window resize events (`tea.WindowSizeMsg`).
 - Supports `--no-color` flag and the `NO_COLOR` environment variable for monochrome / plain text rendering.
+- Local AI explanations are opt-in. Set `ai.enabled` to `true`, configure the local Ollama model in `ai.ollama`, run Ollama, then press `a` on the assessment overview. Explanations do not modify findings, scores, or saved reports.
 
 ---
 
@@ -340,15 +480,24 @@ When exporting with `--format markdown`, Bouclier generates a clean, human-reada
 1. **Passive Network Requests**:
    - Bouclier performs standard DNS resolutions, passive HTTPS TLS handshakes, and bounded HTTP `GET` requests.
    - It **never** executes JavaScript, renders client-side DOM, follows untrusted file downloads, or submits web forms.
-2. **SSRF and Private Network Defenses**:
-   - The scanner validates every resolved IP address against RFC 1918, RFC 3927, RFC 4193, loopback, and multicast ranges.
-   - Connections to private, loopback, link-local, or internal hostnames are strictly refused on both the initial connection and throughout any HTTP redirect chains.
-   - Resolvers pin the validated IP address to prevent DNS rebinding attacks between check time and connection time.
-3. **Credential & Sensitive Data Sanitization**:
+2. **SSRF and Prohibited Address Defenses**:
+   - Outbound network dialers validate every resolved IP address before connection.
+   - Prohibits loopback (`127.0.0.0/8`, `::1`), RFC 1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), Carrier-Grade NAT (`100.64.0.0/10`), link-local (`169.254.0.0/16`, `fe80::/10`), documentation prefixes (`198.51.100.0/24`, `203.0.113.0/24`, `192.0.2.0/24`, `2001:db8::/32`), benchmarking (`198.18.0.0/15`), multicast, non-global unicast, and scoped IPv6 zones.
+   - Pinned socket connections prevent DNS rebinding attacks between DNS resolution and TCP connection time.
+   - Remote feed endpoints are strictly limited to standard web ports (`80`, `443`, `8080`, `8443`), rejecting connections to internal administrative services (e.g. SSH on port 22).
+3. **Parser Limits & Resource Bounds**:
+   - Target URLs and threat indicators are length-bounded to 8,192 bytes; domain labels are bounded to 253 characters.
+   - External feed downloads and collaborative bundles are capped at 10 MiB with explicit overflow detection (`ErrFeedTooLarge`), avoiding silent truncation. Feed records are bounded to 50,000 entries.
+   - Local configuration files and API / MCP payloads are bounded to 1 MiB.
+4. **Credential & Sensitive Data Sanitization**:
    - User credentials embedded in URLs (e.g. `https://user:pass@example.com`) are stripped and never recorded in findings, logs, or exports.
-   - Sensitive HTTP request headers (such as `Authorization` or `Cookie`) and response body payloads are never captured or emitted in reports.
-4. **Export File Protection**:
-   - When writing reports via `--output`, Bouclier creates parent directories with `0700` and files with `0600` permissions, ensuring report contents cannot be accessed by other users on the operating system.
+   - Threat intelligence sources use environment variable references (`--auth-header-env`), never storing plaintext tokens or keys in persistence.
+   - Structured logs automatically redact attributes matching sensitive keys (`token`, `secret`, `api_key`, `password`, `cookie`, `auth`) and scrub authorization tokens in URLs.
+5. **Local API & MCP Browser Origin Protection**:
+   - The local HTTP API server validates `Origin` headers, rejecting any non-loopback browser origins with HTTP 403 Forbidden to protect against drive-by cross-site port scanning and CSRF.
+6. **SQLite Concurrency & Data Isolation**:
+   - Persistent storage uses WAL mode with synchronized write serialization (`writeMu`), eliminating `SQLITE_BUSY` transaction lock contention across concurrent workers while preserving concurrent readers.
+   - Export and database files are restricted with `0600` / `0700` filesystem permissions.
 
 ---
 
@@ -362,7 +511,7 @@ When exporting with `--format markdown`, Bouclier generates a clean, human-reada
 
 ## Development & Testing
 
-Run code quality checks and tests:
+Run code quality checks, tests, and benchmarks:
 
 ```bash
 # Format code
@@ -373,6 +522,16 @@ go vet ./...
 
 # Run automated tests (without external network dependencies)
 go test -v -count=1 ./...
+
+# Run tests with race detector (on Linux / CI)
+go test -race ./...
+
+# Run fuzz smoke tests (deterministic, bounded)
+go test -run=^$ -fuzz=FuzzNormalizeIndicator -fuzztime=2s ./internal/intel
+go test -run=^$ -fuzz=FuzzCertificateSANProcessing -fuzztime=2s ./internal/certanalysis
+
+# Run performance benchmarks
+go test -run=^$ -bench=. ./internal/heuristics ./internal/intel ./internal/risk ./internal/report ./internal/storage
 
 # Build binary
 go build -o bin/bouclier.exe .

@@ -24,6 +24,7 @@ func TestCatalogCoverageAudit(t *testing.T) {
 		"../../internal/tlsintel",
 		"../../internal/webcheck",
 		"../../internal/webintel",
+		"../../internal/intel",
 	}
 
 	for _, pkg := range packages {
@@ -82,11 +83,11 @@ func TestCatalogCoverageAudit(t *testing.T) {
 		}
 	}
 
-	if len(catalog) != 81 {
-		t.Fatalf("expected 81 catalog entries, got %d", len(catalog))
+	if len(catalog) != 86 {
+		t.Fatalf("expected 86 catalog entries, got %d", len(catalog))
 	}
-	if len(discoveredCodes) != 81 {
-		t.Fatalf("expected 81 discovered codes, got %d", len(discoveredCodes))
+	if len(discoveredCodes) != 86 {
+		t.Fatalf("expected 86 discovered codes, got %d", len(discoveredCodes))
 	}
 
 	for code := range discoveredCodes {
@@ -107,7 +108,7 @@ func TestCatalogCoverageAudit(t *testing.T) {
 }
 
 func isFindingCode(s string) bool {
-	prefixes := []string{"URL_", "BRAND_", "PHISHING_", "SUSPICIOUS_", "EXCESSIVE_", "LONG_", "NUMERIC_", "CERT_", "WEB_"}
+	prefixes := []string{"URL_", "BRAND_", "PHISHING_", "SUSPICIOUS_", "EXCESSIVE_", "LONG_", "NUMERIC_", "CERT_", "WEB_", "INTEL_"}
 	for _, p := range prefixes {
 		if strings.HasPrefix(s, p) && len(s) > len(p) {
 			for _, r := range s {

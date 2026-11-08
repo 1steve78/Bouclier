@@ -19,9 +19,9 @@ func RenderProgress(
 	scanErr error,
 	width int,
 ) string {
-	contentWidth := width - 4
-	if contentWidth < 40 {
-		contentWidth = 40
+	contentWidth := width - 6
+	if contentWidth < 30 {
+		contentWidth = 30
 	}
 	if contentWidth > 80 {
 		contentWidth = 80

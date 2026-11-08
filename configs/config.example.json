@@ -1,0 +1,26 @@
+{
+  "application": {
+    "name": "Bouclier",
+    "version": "0.1.0-dev",
+    "environment": "development"
+  },
+  "scanner": {
+    "http_timeout": "8s",
+    "tls_handshake_timeout": "5s",
+    "max_redirects": 5,
+    "max_concurrent_scans": 10,
+    "user_agent": "Bouclier/0.1.0-dev"
+  },
+  "storage": {
+    "database_path": "~/.bouclier/bouclier.db",
+    "cache_ttl": "24h"
+  },
+  "threat_intelligence": {
+    "feed_update_interval": "24h",
+    "feed_urls": []
+  },
+  "logging": {
+    "level": "info",
+    "structured": false
+  }
+}

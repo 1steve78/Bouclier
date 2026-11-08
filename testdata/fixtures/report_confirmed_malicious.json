@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "id": "report-confirmed-malicious",
+  "kind": "url",
+  "target": {
+    "input": "https://payments.examplebank-login.top/confirm",
+    "message_sha256": "",
+    "normalized_url": "https://payments.examplebank-login.top/confirm",
+    "host": "payments.examplebank-login.top",
+    "registrable_domain": "examplebank-login.top"
+  },
+  "risk_level": "confirmed_malicious",
+  "score": 96,
+  "findings": [
+    {
+      "id": "FEED_PAYMENT_LOGIN",
+      "module": "intel",
+      "title": "Threat feed match on a payment login portal",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "feed",
+      "evidence": [
+        {"key": "feed_name", "value": "ExampleBank Threat Feed"},
+        {"key": "payment_handle", "value": "ExampleBank@secure-portal.examplebank-login.top"}
+      ],
+      "impact": "The domain is linked to bank impersonation and credential theft activity.",
+      "recommendation": "Takedown the domain and notify downstream payment operators immediately.",
+      "limitations": "The feed signal may be delayed or incomplete; verify with the live feed before blocking all transactions."
+    },
+    {
+      "id": "URL_BRAND_IMPERSONATION",
+      "module": "domain",
+      "title": "Brand impersonation on a payment portal",
+      "severity": "high",
+      "confidence": "high",
+      "source": "rule",
+      "evidence": [
+        {"key": "brand", "value": "ExampleBank"},
+        {"key": "impostor_domain", "value": "examplebank-login.top"}
+      ],
+      "impact": "Customers may enter credentials into a phishing portal that appears to belong to the real bank.",
+      "recommendation": "Add the domain to blocklists and escalate to abuse teams for takedown.",
+      "limitations": "Some marketing domains reuse brand names; confirm the site content before issuing a full takedown."
+    }
+  ],
+  "indicators": [
+    {"type": "domain", "value": "examplebank-login.top"},
+    {"type": "payment_handle", "value": "ExampleBank@secure-portal.examplebank-login.top"},
+    {"type": "ip", "value": "203.0.113.18"}
+  ],
+  "checks": [
+    {"module": "intel", "status": "completed", "detail": "Threat feed returned a confirmed indicator match for the payment domain."},
+    {"module": "domain", "status": "completed", "detail": "Domain impersonation rules triggered on the ExampleBank brand token."}
+  ],
+  "redirect_chain": [
+    {"url": "https://example.org/secure", "status_code": 302, "location_host": "payments.examplebank-login.top"},
+    {"url": "https://payments.examplebank-login.top/confirm", "status_code": 200, "location_host": "payments.examplebank-login.top"}
+  ],
+  "scanned_at": "2025-01-14T22:45:00Z",
+  "engine_version": "1.0.0",
+  "precautions": ["Do not enter account credentials or payment details."],
+  "limitations": ["This is a confirmed threat feed match and should be treated as active abuse."],
+  "chain": {
+    "status": "confirmed",
+    "tx_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+    "network": "ethereum",
+    "contract_address": "0x1111111111111111111111111111111111111111",
+    "block_number": 18123456,
+    "explorer_url": "https://etherscan.io/tx/0x1234567890abcdef1234567890abcdef1234567890abcdef"
+  },
+  "report_hash": "0x54e47b2d2c6239d901f49c4c9ba0a47dfa1d47cbc5a7a6b7c60845ca89626ea6"
+}

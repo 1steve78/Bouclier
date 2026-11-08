@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "id": "report-high-risk",
+  "kind": "url",
+  "target": {
+    "input": "https://secure-login.bank.example.net/verify",
+    "message_sha256": "",
+    "normalized_url": "https://secure-login.bank.example.net/verify",
+    "host": "secure-login.bank.example.net",
+    "registrable_domain": "example.net"
+  },
+  "risk_level": "high_risk",
+  "score": 76,
+  "findings": [
+    {
+      "id": "TLS_CERT_EXPIRED",
+      "module": "tls",
+      "title": "Certificate expired or misconfigured",
+      "severity": "high",
+      "confidence": "high",
+      "source": "rule",
+      "evidence": [
+        {"key": "not_after", "value": "2024-11-12T00:00:00Z"},
+        {"key": "issuer", "value": "Example Bank Issuer"}
+      ],
+      "impact": "Visitors will see certificate warnings and may abandon the transaction.",
+      "recommendation": "Replace the certificate and verify the chain before re-enabling the site.",
+      "limitations": "This should be verified against the live certificate state and local time."
+    },
+    {
+      "id": "URL_PHISHING_REDIRECT",
+      "module": "url",
+      "title": "Credential harvesting redirect chain",
+      "severity": "high",
+      "confidence": "medium",
+      "source": "probe",
+      "evidence": [
+        {"key": "redirect_count", "value": "3"},
+        {"key": "suspicious_host", "value": "secure-login.bank.example.net"}
+      ],
+      "impact": "The visitor may be routed into a credential capture flow after an initial trusted page.",
+      "recommendation": "Block the redirect chain and alert the security team for a live review.",
+      "limitations": "This is based on redirect semantics and may reflect a temporary change in page structure."
+    }
+  ],
+  "indicators": [
+    {"type": "domain", "value": "secure-login.bank.example.net"},
+    {"type": "cert_fingerprint", "value": "ab12cd34ef56"}
+  ],
+  "checks": [
+    {"module": "tls", "status": "completed", "detail": "Certificate chain checks failed due to an expired leaf certificate."},
+    {"module": "url", "status": "completed", "detail": "Redirect analysis identified a credential capture pattern."}
+  ],
+  "redirect_chain": [
+    {"url": "https://example.net/secure-login", "status_code": 302, "location_host": "secure-login.bank.example.net"},
+    {"url": "https://secure-login.bank.example.net/verify", "status_code": 302, "location_host": "capture.example.net"}
+  ],
+  "scanned_at": "2025-01-14T22:30:00Z",
+  "engine_version": "1.0.0",
+  "precautions": ["Avoid entering data until certificate and redirect checks are reviewed."],
+  "limitations": ["This assessment is based on static evidence and may not reflect live traffic conditions."],
+  "report_hash": "0x88a34d048bd5ea21e4499ed17c6606187224f3d7c7c89ef76701398915ec4356"
+}

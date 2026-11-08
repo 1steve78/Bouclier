@@ -1,0 +1,22 @@
+{
+  "groups": [
+    {
+      "id": "corr-ip-198-51-100-9",
+      "shared": {"type": "ip", "value": "198.51.100.9"},
+      "strength": "weak",
+      "report_ids": ["report-suspicious", "report-confirmed-malicious"],
+      "count": 2,
+      "first_seen": "2025-01-14T22:13:00Z",
+      "last_seen": "2025-01-14T22:45:00Z"
+    },
+    {
+      "id": "corr-payment-handle",
+      "shared": {"type": "payment_handle", "value": "ExampleBank@secure-portal.examplebank-login.top"},
+      "strength": "strong",
+      "report_ids": ["report-suspicious", "report-confirmed-malicious"],
+      "count": 2,
+      "first_seen": "2025-01-14T22:13:00Z",
+      "last_seen": "2025-01-14T22:45:00Z"
+    }
+  ]
+}

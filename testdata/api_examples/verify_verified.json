@@ -1,0 +1,11 @@
+{
+  "recomputed_hash": "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "matches_stored": true,
+  "status": "verified",
+  "on_chain": {
+    "exists": true,
+    "risk_level": "high_risk",
+    "reporter": "0x1111111111111111111111111111111111111111",
+    "timestamp": "2025-01-14T22:30:00Z"
+  }
+}

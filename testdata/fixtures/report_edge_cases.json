@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "report-edge-cases",
+  "kind": "url",
+  "target": {
+    "input": "https://exаmple.org/path",
+    "normalized_url": "https://exаmple.org/path",
+    "host": "exаmple.org",
+    "registrable_domain": "exаmple.org"
+  },
+  "risk_level": "low_risk",
+  "score": 8,
+  "findings": [
+    {
+      "id": "URL_EDGE_CASE",
+      "module": "url",
+      "title": "Signs &, <markers> >, 'quotes' \"slashes\" \\ tab\tline\nseparator  emoji 😀",
+      "severity": "low",
+      "confidence": "medium",
+      "source": "rule",
+      "evidence": [
+        {"key": "z-last", "value": "last"},
+        {"key": "a-first", "value": "& < > ' \" \\ \t\n  😀"}
+      ],
+      "impact": "The input contains unusual Unicode and escaped punctuation.",
+      "recommendation": "Review the displayed host and preserve the original characters.",
+      "limitations": "Unicode lookalikes require contextual interpretation."
+    }
+  ],
+  "indicators": [
+    {"type": "url", "value": "https://exаmple.org/path"},
+    {"type": "domain", "value": "exаmple.org"},
+    {"type": "domain", "value": "😀.example"},
+    {"type": "domain", "value": ".example"},
+    {"type": "ip", "value": "203.0.113.8"}
+  ],
+  "checks": [
+    {"module": "url", "status": "completed", "detail": "UTF-8 serialization fixture"}
+  ],
+  "redirect_chain": [],
+  "scanned_at": "2025-01-14T22:00:00Z",
+  "engine_version": "1.0.0",
+  "precautions": ["Compare Unicode domains carefully."],
+  "limitations": ["This is not a guarantee of safety."],
+  "report_hash": "0xde14b42a420a5aa91987e90c218bce1d4db70e4c228b579c378db28cfa7811f9"
+}

@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "id": "report-message",
+  "kind": "message",
+  "target": {
+    "input": "",
+    "message_sha256": "a3f7c0d9e1f3c807f4dbabf12f57a7298d62f7a9f3d559b8d68d7f3d9834af2b"
+  },
+  "risk_level": "suspicious",
+  "score": 31,
+  "findings": [
+    {
+      "id": "MSG_PERSUASIVE_LANGUAGE",
+      "module": "message",
+      "title": "Urgent persuasive language",
+      "severity": "medium",
+      "confidence": "medium",
+      "source": "rule",
+      "evidence": [
+        {"key": "alert_words", "value": "urgent; act now"}
+      ],
+      "impact": "The content uses urgency to pressure a quick response without verification.",
+      "recommendation": "Review the message for social engineering cues and flag it before forwarding.",
+      "limitations": "Urgency alone is not proof of malicious intent; context matters."
+    },
+    {
+      "id": "MSG_LINK_IN_MESSAGE",
+      "module": "url",
+      "title": "Embedded URL requires review",
+      "severity": "low",
+      "confidence": "medium",
+      "source": "probe",
+      "evidence": [
+        {"key": "url_detected", "value": "https://examp1ebank-login.top/signin"},
+        {"key": "message_sha256", "value": "a3f7c0d9e1f3c807f4dbabf12f57a7298d62f7a9f3d559b8d68d7f3d9834af2b"}
+      ],
+      "impact": "A URL embedded in the message may merit URL-level warning or blocking.",
+      "recommendation": "Review the linked destination before sending or clicking the message.",
+      "limitations": "The content analysis did not include live website checks."
+    }
+  ],
+  "indicators": [
+    {"type": "url", "value": "https://examp1ebank-login.top/signin"}
+  ],
+  "checks": [
+    {"module": "message", "status": "completed", "detail": "Urgency and persuasive wording were detected in the message body."},
+    {"module": "url", "status": "skipped", "detail": "URL review was deferred because the message analysis is context-limited."}
+  ],
+  "redirect_chain": [],
+  "scanned_at": "2025-01-14T23:00:00Z",
+  "engine_version": "1.0.0",
+  "precautions": ["Do not forward or click suspicious links without verification."],
+  "limitations": ["This is not a guarantee of safety, but it is a trigger for manual review."],
+  "report_hash": "0xbd8848e56ff5937c1fdb425db96de7db6e85e1537dcce18cb9bf84697304dd0c"
+}

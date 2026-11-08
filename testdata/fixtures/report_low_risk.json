@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "report-low-risk",
+  "kind": "url",
+  "target": {
+    "input": "https://www.example.org/login",
+    "message_sha256": "",
+    "normalized_url": "https://www.example.org/login",
+    "host": "www.example.org",
+    "registrable_domain": "example.org"
+  },
+  "risk_level": "low_risk",
+  "score": 12,
+  "findings": [
+    {
+      "id": "URL_LOW_RISK",
+      "module": "url",
+      "title": "Low-risk public page",
+      "severity": "low",
+      "confidence": "medium",
+      "source": "rule",
+      "evidence": [
+        {"key": "destination", "value": "https://www.example.org/login"}
+      ],
+      "impact": "No evidence of malicious behavior is present.",
+      "recommendation": "Continue routine monitoring.",
+      "limitations": "This is a heuristic assessment and not a guarantee of safety."
+    }
+  ],
+  "indicators": [
+    {"type": "domain", "value": "example.org"}
+  ],
+  "checks": [
+    {"module": "tls", "status": "skipped", "detail": "TLS validation deferred for the low-risk baseline."}
+  ],
+  "redirect_chain": [],
+  "scanned_at": "2025-01-14T22:00:00Z",
+  "engine_version": "1.0.0",
+  "precautions": ["Keep browsers and extensions updated."],
+  "limitations": ["This is not a guarantee of safety."],
+  "report_hash": "0x6a5afa888165d404008dd7a409e8176a4283716f8145970311d71b879a328d72"
+}

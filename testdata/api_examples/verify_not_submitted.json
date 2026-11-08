@@ -1,0 +1,11 @@
+{
+  "recomputed_hash": "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "matches_stored": true,
+  "status": "not_submitted",
+  "on_chain": {
+    "exists": false,
+    "risk_level": "low_risk",
+    "reporter": "",
+    "timestamp": ""
+  }
+}

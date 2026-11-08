@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "target_blocked",
+    "message": "The supplied target is blocked by SSRF protections.",
+    "details": {"target": "127.0.0.1"}
+  }
+}

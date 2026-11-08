@@ -1,0 +1,577 @@
+openapi: 3.0.3
+info:
+  title: Bouclier API
+  version: 1.0.0
+servers:
+  - url: /api/v1
+security: []
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+  /config:
+    get:
+      summary: Configuration
+      responses:
+        '200':
+          description: Configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigResponse'
+  /scan:
+    post:
+      summary: Scan a URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScanRequest'
+      responses:
+        '200':
+          description: Scan report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+  /analyze-message:
+    post:
+      summary: Analyze a message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeMessageRequest'
+      responses:
+        '200':
+          description: Message analysis response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeMessageResponse'
+  /reports:
+    get:
+      summary: List reports
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+        - in: query
+          name: cursor
+          schema:
+            type: string
+        - in: query
+          name: risk_level
+          schema:
+            $ref: '#/components/schemas/RiskLevel'
+      responses:
+        '200':
+          description: List of report summaries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportListResponse'
+  /reports/{id}:
+    get:
+      summary: Fetch a report by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+  /reports/{id}/submit:
+    post:
+      summary: Submit a report for chain verification
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Accepted submission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChainSubmission'
+        '409':
+          description: Already reported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /reports/{id}/verify:
+    get:
+      summary: Verify a report
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationResponse'
+  /correlations:
+    get:
+      summary: Find related reports
+      parameters:
+        - in: query
+          name: report_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Related reports
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorrelationResponse'
+components:
+  schemas:
+    RiskLevel:
+      type: string
+      enum: [low_risk, suspicious, high_risk, confirmed_malicious]
+    Severity:
+      type: string
+      enum: [info, low, medium, high, critical]
+    Confidence:
+      type: string
+      enum: [low, medium, high]
+    Module:
+      type: string
+      enum: [url, domain, tls, web, intel, message, correlation]
+    FindingSource:
+      type: string
+      enum: [rule, feed, probe]
+    CheckStatus:
+      type: string
+      enum: [completed, skipped, failed]
+    IndicatorType:
+      type: string
+      enum: [url, domain, ip, email, phone, cert_fingerprint, payment_handle]
+    ReportKind:
+      type: string
+      enum: [url, message]
+    ChainStatus:
+      type: string
+      enum: [pending, confirmed, failed]
+    Evidence:
+      type: object
+      required: [key, value]
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+    Finding:
+      type: object
+      required: [id, module, title, severity, confidence, source, evidence, impact, recommendation, limitations]
+      properties:
+        id:
+          type: string
+        module:
+          $ref: '#/components/schemas/Module'
+        title:
+          type: string
+        severity:
+          $ref: '#/components/schemas/Severity'
+        confidence:
+          $ref: '#/components/schemas/Confidence'
+        source:
+          $ref: '#/components/schemas/FindingSource'
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/Evidence'
+        impact:
+          type: string
+        recommendation:
+          type: string
+        limitations:
+          type: string
+    Indicator:
+      type: object
+      required: [type, value]
+      properties:
+        type:
+          $ref: '#/components/schemas/IndicatorType'
+        value:
+          type: string
+    Check:
+      type: object
+      required: [module, status, detail]
+      properties:
+        module:
+          $ref: '#/components/schemas/Module'
+        status:
+          $ref: '#/components/schemas/CheckStatus'
+        detail:
+          type: string
+    RedirectChainEntry:
+      type: object
+      required: [url, status_code, location_host]
+      properties:
+        url:
+          type: string
+        status_code:
+          type: integer
+        location_host:
+          type: string
+    ReportTarget:
+      type: object
+      required: [input]
+      properties:
+        input:
+          type: string
+          description: Submitted URL/domain for URL reports; empty for message reports.
+        message_sha256:
+          type: string
+          description: SHA-256 digest of message content; required for message reports.
+        normalized_url:
+          type: string
+          description: Required for URL reports; omitted for message reports when empty.
+        host:
+          type: string
+          description: Required for URL reports; omitted for message reports when empty.
+        registrable_domain:
+          type: string
+          description: Required for URL reports; omitted for message reports when empty.
+    AIExplanation:
+      type: object
+      required: [provider, model, text, generated_at]
+      properties:
+        provider:
+          type: string
+        model:
+          type: string
+        text:
+          type: string
+        generated_at:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'
+    AIObservation:
+      type: object
+      required: [label, explanation, excerpt]
+      properties:
+        label:
+          type: string
+        explanation:
+          type: string
+        excerpt:
+          type: string
+    Chain:
+      type: object
+      required: [status, tx_hash, network, contract_address, block_number, explorer_url]
+      properties:
+        status:
+          $ref: '#/components/schemas/ChainStatus'
+        tx_hash:
+          type: string
+        network:
+          type: string
+        contract_address:
+          type: string
+        block_number:
+          type: integer
+        explorer_url:
+          type: string
+    Report:
+      type: object
+      required: [schema_version, id, kind, target, risk_level, score, findings, indicators, checks, redirect_chain, scanned_at, engine_version, precautions, limitations, report_hash]
+      properties:
+        schema_version:
+          type: integer
+          enum: [1]
+        id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/ReportKind'
+        target:
+          $ref: '#/components/schemas/ReportTarget'
+        risk_level:
+          $ref: '#/components/schemas/RiskLevel'
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/Finding'
+        indicators:
+          type: array
+          items:
+            $ref: '#/components/schemas/Indicator'
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Check'
+        redirect_chain:
+          type: array
+          items:
+            $ref: '#/components/schemas/RedirectChainEntry'
+        scanned_at:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'
+        engine_version:
+          type: string
+        precautions:
+          type: array
+          items:
+            type: string
+        limitations:
+          type: array
+          items:
+            type: string
+        ai_explanation:
+          $ref: '#/components/schemas/AIExplanation'
+        ai_observations:
+          type: array
+          items:
+            $ref: '#/components/schemas/AIObservation'
+        linked_report_ids:
+          type: array
+          items:
+            type: string
+        chain:
+          $ref: '#/components/schemas/Chain'
+        report_hash:
+          type: string
+    ConfigResponse:
+      type: object
+      required: [version, ai, chain, limits]
+      properties:
+        version:
+          type: string
+        ai:
+          type: object
+          required: [default, providers]
+          properties:
+            default:
+              type: string
+            providers:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProviderInfo'
+        chain:
+          type: object
+          required: [enabled, network, chain_id, contract_address, rpc_url, explorer_tx_url_template, explorer_address_url_template]
+          properties:
+            enabled:
+              type: boolean
+            network:
+              type: string
+            chain_id:
+              type: integer
+            contract_address:
+              type: string
+            rpc_url:
+              type: string
+            explorer_tx_url_template:
+              type: string
+            explorer_address_url_template:
+              type: string
+        limits:
+          type: object
+          required: [max_message_chars, scan_timeout_seconds]
+          properties:
+            max_message_chars:
+              type: integer
+            scan_timeout_seconds:
+              type: integer
+    ProviderInfo:
+      type: object
+      required: [id, label, available]
+      properties:
+        id:
+          type: string
+          enum: [off, ollama, api]
+        label:
+          type: string
+        available:
+          type: boolean
+    ScanRequest:
+      type: object
+      required: [input]
+      properties:
+        input:
+          type: string
+        options:
+          type: object
+          properties:
+            ai:
+              type: boolean
+    AnalyzeMessageRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        options:
+          type: object
+          properties:
+            ai:
+              type: boolean
+    AnalyzeMessageResponse:
+      type: object
+      required: [report, url_reports]
+      properties:
+        report:
+          $ref: '#/components/schemas/Report'
+        url_reports:
+          type: array
+          items:
+            $ref: '#/components/schemas/Report'
+    ReportSummary:
+      type: object
+      required: [id, kind, target, risk_level, score, scanned_at]
+      properties:
+        id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/ReportKind'
+        target:
+          type: string
+        risk_level:
+          $ref: '#/components/schemas/RiskLevel'
+        score:
+          type: integer
+        scanned_at:
+          type: string
+          format: date-time
+        chain_status:
+          $ref: '#/components/schemas/ChainStatus'
+    ReportListResponse:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportSummary'
+        next_cursor:
+          type: string
+    ChainSubmission:
+      type: object
+      required: [status, id, chain_status, tx_hash]
+      properties:
+        status:
+          type: string
+        id:
+          type: string
+        chain_status:
+          $ref: '#/components/schemas/ChainStatus'
+        tx_hash:
+          type: string
+    VerificationResponse:
+      type: object
+      required: [recomputed_hash, matches_stored, status]
+      properties:
+        recomputed_hash:
+          type: string
+        matches_stored:
+          type: boolean
+        status:
+          type: string
+          enum: [verified, mismatch, not_submitted, chain_unavailable]
+        on_chain:
+          type: object
+          properties:
+            exists:
+              type: boolean
+            risk_level:
+              $ref: '#/components/schemas/RiskLevel'
+            reporter:
+              type: string
+            timestamp:
+              type: string
+              format: date-time
+    CorrelationGroup:
+      type: object
+      required: [id, shared, strength, report_ids, count, first_seen, last_seen]
+      properties:
+        id:
+          type: string
+        shared:
+          type: object
+          required: [type, value]
+          properties:
+            type:
+              $ref: '#/components/schemas/IndicatorType'
+            value:
+              type: string
+        strength:
+          type: string
+          enum: [strong, weak]
+        report_ids:
+          type: array
+          items:
+            type: string
+        count:
+          type: integer
+        first_seen:
+          type: string
+          format: date-time
+        last_seen:
+          type: string
+          format: date-time
+    CorrelationResponse:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/CorrelationGroup'
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [invalid_input, target_blocked, rate_limited, scan_timeout, not_found, ai_unavailable, chain_unavailable, already_reported, internal]
+            message:
+              type: string
+            details:
+              type: object
+  responses:
+    Error:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "report-suspicious",
+  "kind": "url",
+  "target": {
+    "input": "https://examp1ebank-login.top/signin",
+    "message_sha256": "",
+    "normalized_url": "https://examp1ebank-login.top/signin",
+    "host": "examp1ebank-login.top",
+    "registrable_domain": "examp1ebank-login.top"
+  },
+  "risk_level": "suspicious",
+  "score": 42,
+  "findings": [
+    {
+      "id": "URL_LOOKALIKE_BANK",
+      "module": "url",
+      "title": "Lookalike bank login page",
+      "severity": "medium",
+      "confidence": "high",
+      "source": "rule",
+      "evidence": [
+        {"key": "registrable_domain", "value": "examp1ebank-login.top"},
+        {"key": "keyword", "value": "bank-login"}
+      ],
+      "impact": "The page imitates a trusted banking login, increasing credential phishing risk.",
+      "recommendation": "Block the page and warn users before credential entry.",
+      "limitations": "This finding is based on a lookalike domain pattern and may be a benign marketing domain."
+    }
+  ],
+  "indicators": [
+    {"type": "domain", "value": "examp1ebank-login.top"},
+    {"type": "ip", "value": "198.51.100.9"}
+  ],
+  "checks": [
+    {"module": "domain", "status": "completed", "detail": "Registrable domain matched a high-risk keyword dictionary."}
+  ],
+  "redirect_chain": [
+    {"url": "https://example.org/landing", "status_code": 302, "location_host": "examp1ebank-login.top"}
+  ],
+  "scanned_at": "2025-01-14T22:13:00Z",
+  "engine_version": "1.0.0",
+  "precautions": ["Do not enter credentials on untrusted pages."],
+  "limitations": ["This result is a heuristic assessment and not a guarantee of malicious intent."],
+  "report_hash": "0x656b99813b9c10b0a2938cab19ac780ad3fbe13dee4c9173aca3d54ddbf5c105"
+}

@@ -1,0 +1,8 @@
+{
+  "report_low_risk.json": "0x6a5afa888165d404008dd7a409e8176a4283716f8145970311d71b879a328d72",
+  "report_suspicious.json": "0x656b99813b9c10b0a2938cab19ac780ad3fbe13dee4c9173aca3d54ddbf5c105",
+  "report_high_risk.json": "0x88a34d048bd5ea21e4499ed17c6606187224f3d7c7c89ef76701398915ec4356",
+  "report_confirmed_malicious.json": "0x54e47b2d2c6239d901f49c4c9ba0a47dfa1d47cbc5a7a6b7c60845ca89626ea6",
+  "report_message.json": "0xbd8848e56ff5937c1fdb425db96de7db6e85e1537dcce18cb9bf84697304dd0c",
+  "report_edge_cases.json": "0xde14b42a420a5aa91987e90c218bce1d4db70e4c228b579c378db28cfa7811f9"
+}

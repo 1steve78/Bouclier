@@ -8,14 +8,16 @@ Phishing detection asks whether a URL or site may be deceptive or malicious. Web
 
 ### Implemented today
 
-- Cobra CLI commands: `bouclier scan`, `bouclier history` (`list`, `show`, `delete`), `bouclier intel` (`status`, `sources` [`list`, `add`, `remove`, `enable`, `disable`], `update`, `search`, `import`, `export`, `prune`), `bouclier tui`, `bouclier serve`, `bouclier config show`, `bouclier version`.
+- Cobra CLI commands: `bouclier scan`, `bouclier history` (`list`, `show`, `correlate`, `delete`), `bouclier intel` (`status`, `sources` [`list`, `add`, `remove`, `enable`, `disable`], `update`, `search`, `import`, `export`, `prune`), `bouclier tui`, `bouclier serve`, `bouclier mcp`, `bouclier config show`, `bouclier version`.
 - Interactive Bubble Tea Terminal UI (`internal/tui`) with live stage progress, keyboard navigation, findings filter, coverage analysis, report exporter, persistent scan history explorer, and dedicated threat intelligence explorer (`ScreenIntel`).
 - Local SQLite persistence engine (`internal/storage`) using pure-Go `modernc.org/sqlite` with schema migrations, WAL mode, foreign keys, cascading report storage, and normalized threat intelligence tables (`intel_sources`, `intel_indicators`, `intel_sync_runs`).
 - Collaborative Threat Intelligence subsystem (`internal/intel`):
   - Local-first indicator matching during scans (exact URL, exact domain, registrable domain, exact IP).
   - Secure feed ingestion pipeline (HTTPS only, SSRF protection, bounded memory/timeout, redirect handling).
-  - Collaborative bundle exchange format (`bouclier-intel-bundle/v1`) with deterministic SHA-256 integrity verification (guaranteeing file/transport integrity relative to the manifest; not an authenticated digital signature).
+  - Collaborative bundle exchange format (`bouclier-intel-bundle/v1`) with deterministic SHA-256 integrity verification.
   - Zero background telemetry or ambient sharing of target URLs.
+- Model Context Protocol (MCP) server (`internal/mcpserver`):
+  - Stdio JSON-RPC 2.0 interface exposing 7 read-only tools (`check_url`, `inspect_tls`, `scan_headers`, `lookup_threat_feeds`, `analyze_message`, `get_report`, `verify_report`).
 - Comprehensive security analysis pipeline:
   - URL heuristics, homographs, entropy, brand impersonation (`internal/heuristics`).
   - Domain structure, DNS intelligence, registration analysis (`internal/domain`, `internal/registration`).
@@ -28,6 +30,7 @@ Phishing detection asks whether a URL or site may be deceptive or malicious. Web
   - Canonical `bouclier-risk/v1` reporting schema.
 - Report rendering in terminal ANSI color, JSON, and Markdown (`internal/report`, `internal/cli`).
 - HTTP API server (`internal/api`) binding to loopback with health and scan endpoints.
+- Release engineering and reproducible cross-platform packaging (`scripts/package-release.go`, GitHub Actions automation, SemVer linker metadata injection).
 - Configuration loading, secret redaction, context-injected `log/slog` logging.
 
 ## High-level architecture

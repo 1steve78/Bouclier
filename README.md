@@ -1,6 +1,36 @@
 # Bouclier
 
-Bouclier is a Go-based command-line security tool for phishing detection, domain risk evaluation, and website security posture assessment. It orchestrates passive URL heuristics, domain intelligence, TLS/certificate analysis, and HTTP header security checks into an explainable, deterministic risk scoring framework.
+[![CI](https://github.com/1steve78/Bouclier/actions/workflows/ci.yml/badge.svg)](https://github.com/1steve78/Bouclier/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](docs/versioning.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/1steve78/Bouclier)](https://goreportcard.com/report/github.com/1steve78/Bouclier)
+
+Bouclier is an open-source, local-first URL intelligence, phishing detection, and website security posture assessment tool built with Go. It orchestrates passive URL heuristics, domain intelligence, TLS/certificate analysis, Certificate Transparency (CT) log verification, and HTTP response security checks into an explainable, deterministic risk scoring framework (`bouclier-risk/v1`).
+
+---
+
+## Documentation Quick Links
+
+| Document | Purpose |
+|---|---|
+| [**Installation Guide**](docs/installation.md) | Binary downloads, installation for Windows, Linux, macOS, and checksum verification. |
+| [**Upgrading Guide**](docs/upgrading.md) | Safe binary replacement, SQLite migrations, and backup procedures. |
+| [**CLI Reference**](docs/cli-reference.md) | Complete guide to commands, flags, exit codes, and scripting options. |
+| [**Interactive TUI Guide**](docs/tui-guide.md) | Keyboard shortcuts, screen navigation, live scan progress, and finding inspector. |
+| [**Configuration Guide**](docs/configuration.md) | JSON configuration schema, environment variables, default paths, and timeouts. |
+| [**Threat Intelligence**](docs/threat-intelligence.md) | Local-first feed ingestion, normalization, matching, and bundle exchange (`bouclier-intel-bundle/v1`). |
+| [**REST API Reference**](docs/api-reference.md) | Loopback HTTP API daemon (`bouclier serve`), endpoints, cURL examples, and error schemas. |
+| [**MCP Integration Guide**](docs/mcp-integration.md) | Claude Desktop, Antigravity, and Cursor setup with the Model Context Protocol server (`bouclier mcp`). |
+| [**Reporting Methodology**](docs/reporting.md) | Deterministic 0–100 scoring, category caps, finding severity weights, and canonical schema. |
+| [**Security Model & SSRF Defense**](docs/security-model.md) | Multi-layer SSRF prevention, IP socket pinning, bounded memory, and responsible disclosure. |
+| [**System Architecture**](docs/architecture.md) | Comprehensive engineering design across all 24 packages and subsystems. |
+| [**Versioning Policy**](docs/versioning.md) | Semantic versioning policy, linker metadata injection, and subsystem compatibility matrix. |
+| [**Security Policy**](SECURITY.md) | Supported versions, GitHub Private Vulnerability Reporting, and disclosure timeline. |
+| [**Contributing Guide**](CONTRIBUTING.md) | Development setup, coding standards, test suites, and pull request workflows. |
+| [**Changelog**](CHANGELOG.md) | Version history and detailed changelog following Keep a Changelog. |
+| [**Third-Party Notices**](THIRD_PARTY_NOTICES.md) | Complete inventory of third-party dependencies, licenses, and copyright notices. |
+
+---
 
 ## Key Capabilities
 
@@ -11,7 +41,7 @@ Bouclier is a Go-based command-line security tool for phishing detection, domain
 - **URL & Domain Heuristics**: Evaluates homograph/IDN spoofing, entropy, suspicious top-level domains, IP-as-host, deep subdomains, and credential indicators.
 - **TLS Intelligence**: Inspects certificate validity, key strength, issuer trust, signature algorithms, expiration windows, and optional Certificate Transparency (CT) logs.
 - **Passive HTTP Security Assessment**: Analyzes HTTP security response headers (HSTS, CSP, X-Frame-Options, etc.), cookie security flags (`Secure`, `HttpOnly`, `SameSite`), and safe redirect sequences.
-- **Unified Deterministic Risk Scoring**: Aggregates normalized findings using the `bouclier-default` policy into an overall score (0–100) and clear classification (`clean`, `low`, `medium`, `high`, `critical`).
+- **Unified Deterministic Risk Scoring**: Aggregates normalized findings using the `bouclier-default` policy into an overall score (0–100) and clear classification (`low`, `guarded`, `elevated`, `high`, `severe`).
 - **Flexible Export Formats**: Human-readable terminal output (with ANSI color, quiet, and verbose modes), structured machine-readable JSON (`bouclier-risk/v1`), and clean Markdown reports.
 - **CI/CD Integration**: Supports deterministic exit codes and a `--fail-on-risk` threshold flag to gate deployment pipelines.
 - **Built-in Safety & Privacy**: Enforces strict SSRF mitigations, IP address pinning, private network blocks, credential scrubbing, and secure file creation permissions (`0600`). Never stores credentials, tokens, or raw HTTP bodies in persistence.
@@ -22,14 +52,14 @@ Bouclier is a Go-based command-line security tool for phishing detection, domain
 
 ### Prerequisites
 
-- [Go 1.22](https://go.dev/dl/) or later
+- [Go 1.24](https://go.dev/dl/) or later
 - Git
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/your-org/bouclier.git
-cd bouclier
+git clone https://github.com/1steve78/Bouclier.git
+cd Bouclier
 go build -o bin/bouclier.exe .
 ```
 
@@ -109,6 +139,10 @@ bouclier history list --status completed --limit 10 --offset 20
 
 # Output as structured JSON
 bouclier history list --format json
+
+# Correlate reports for a hostname and display a score graph
+bouclier history correlate example.com
+bouclier history correlate example.com --format markdown --output trend.md
 ```
 
 Flags:
@@ -119,7 +153,28 @@ Flags:
 - `--status <status>`: Filter by execution status (`completed`, `partial`, `failed`, `cancelled`).
 - `--format <fmt>`: Output format (`table` or `json`, default: `table`).
 
-#### 2. Viewing a Historical Assessment
+#### 2. Correlating Reports
+
+```bash
+bouclier history correlate example.com
+bouclier history correlate example.com --format json --output trend.json
+```
+
+Correlation groups reports by exact normalized hostname, orders them chronologically, graphs the deterministic score, and compares consecutive reports for new and resolved findings. Finding identity is based on normalized code, category, title, and evidence. The latest 100 matching reports are used by default; `--limit` accepts up to 500. Output formats are `terminal`, `json`, and `markdown`. Correlation does not modify stored reports or recompute scores.
+
+#### 3. Anchoring and Verifying Report Hashes
+
+The optional EVM registry records only the report's stored SHA-256 digest and a manually selected risk level. It does not publish the report, URL, or finding data. Deploy [`contracts/ThreatRegistry.sol`](./contracts/ThreatRegistry.sol) to an EVM-compatible network, then set the signing key in an environment variable:
+
+```powershell
+$env:BOUCLIER_EVM_PRIVATE_KEY = "<private-key>"
+bouclier history anchor 7a9b2c3d --rpc-url https://<evm-rpc> --contract-address 0x<deployed-contract> --risk-level 1
+bouclier history verify 7a9b2c3d --rpc-url https://<evm-rpc> --contract-address 0x<deployed-contract>
+```
+
+Risk levels must be selected by a reviewer: `1` suspicious, `2` high risk, `3` confirmed malicious. Bouclier does not infer a confirmed-malicious status from its scan score. Anchor transaction metadata is also retained locally; the contract prevents duplicate hashes. Keep the signing key out of command arguments and config files, and use a test network before any production deployment.
+
+#### 4. Viewing a Historical Assessment
 
 ```bash
 # View terminal summary for a scan (accepts 8-character prefix or full UUID)
@@ -139,7 +194,7 @@ Flags:
 - `--verbose`: Include all technical findings regardless of severity.
 - `--no-color`: Disable ANSI color highlighting.
 
-#### 3. Deleting a Historical Scan
+#### 5. Deleting a Historical Scan
 
 ```bash
 # Delete with interactive confirmation
@@ -538,3 +593,19 @@ go build -o bin/bouclier.exe .
 ```
 
 All automated unit and CLI integration tests run hermetically using mock analyzers and local test fixtures with no dependencies on external live internet services.
+
+---
+
+## Security & Responsible Disclosure
+
+For vulnerability reporting instructions and our disclosure policy, please consult [SECURITY.md](SECURITY.md). Vulnerabilities should be reported via [GitHub Private Vulnerability Reporting](https://github.com/1steve78/Bouclier/security/advisories/new).
+
+---
+
+## License
+
+Bouclier is licensed under the [MIT License](LICENSE).
+
+Copyright (c) 2026 1steve78 and The Bouclier Authors.
+
+Third-party libraries and dependencies compiled or linked into Bouclier binary distributions are licensed under their respective open-source licenses (MIT, BSD-3-Clause, Apache-2.0). Third-party dependencies are not automatically licensed under MIT; their applicable licenses and copyright notices are preserved in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

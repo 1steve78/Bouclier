@@ -2,61 +2,60 @@
 
 ## Project overview
 
-Bouclier is a Go CLI foundation for phishing detection and website security assessment. It aims to help security-conscious users, incident responders, developers, and administrators inspect suspicious URLs and understand website security signals in one report.
+Bouclier is a **Terminal-First Security Workstation** and command-line security assessment engine built with Go. It brings together URL heuristics, domain intelligence, TLS verification, Certificate Transparency (CT) log analysis, passive HTTP posture checks, and local threat intelligence into an explainable, deterministic risk scoring framework (`bouclier-risk/v1`).
 
-Phishing detection asks whether a URL or site may be deceptive or malicious. Website security assessment examines properties such as transport security, certificate validity, and HTTP security controls. These concerns overlap, but they are not interchangeable: a site can have good TLS and still be a phish, and a legitimate site can have weak security settings without being a phishing site.
+### Implemented Architecture (v1.1.0)
 
-### Implemented today
-
-- Cobra CLI commands: `bouclier scan`, `bouclier history` (`list`, `show`, `correlate`, `delete`), `bouclier intel` (`status`, `sources` [`list`, `add`, `remove`, `enable`, `disable`], `update`, `search`, `import`, `export`, `prune`), `bouclier tui`, `bouclier serve`, `bouclier mcp`, `bouclier config show`, `bouclier version`.
-- Interactive Bubble Tea Terminal UI (`internal/tui`) with live stage progress, keyboard navigation, findings filter, coverage analysis, report exporter, persistent scan history explorer, and dedicated threat intelligence explorer (`ScreenIntel`).
-- Local SQLite persistence engine (`internal/storage`) using pure-Go `modernc.org/sqlite` with schema migrations, WAL mode, foreign keys, cascading report storage, and normalized threat intelligence tables (`intel_sources`, `intel_indicators`, `intel_sync_runs`).
-- Collaborative Threat Intelligence subsystem (`internal/intel`):
-  - Local-first indicator matching during scans (exact URL, exact domain, registrable domain, exact IP).
-  - Secure feed ingestion pipeline (HTTPS only, SSRF protection, bounded memory/timeout, redirect handling).
-  - Collaborative bundle exchange format (`bouclier-intel-bundle/v1`) with deterministic SHA-256 integrity verification.
-  - Zero background telemetry or ambient sharing of target URLs.
-- Model Context Protocol (MCP) server (`internal/mcpserver`):
-  - Stdio JSON-RPC 2.0 interface exposing 7 read-only tools (`check_url`, `inspect_tls`, `scan_headers`, `lookup_threat_feeds`, `analyze_message`, `get_report`, `verify_report`).
-- Comprehensive security analysis pipeline:
-  - URL heuristics, homographs, entropy, brand impersonation (`internal/heuristics`).
-  - Domain structure, DNS intelligence, registration analysis (`internal/domain`, `internal/registration`).
-  - TLS handshake, certificate analysis, validation, key strength (`internal/tlscheck`, `internal/tlsintel`, `internal/certanalysis`).
-  - Certificate Transparency log querying and evidence aggregation (`internal/ct`).
-  - Passive HTTP inspection, security headers, cookie security, CORS, disclosure (`internal/webcheck`, `internal/webintel`).
-- Unified risk engine (`internal/risk`):
-  - Deterministic capped integer weighted-sum scoring (0–100 relative index).
-  - Risk classifications: `low`, `guarded`, `elevated`, `high`, `critical`.
-  - Canonical `bouclier-risk/v1` reporting schema.
-- Report rendering in terminal ANSI color, JSON, and Markdown (`internal/report`, `internal/cli`).
-- HTTP API server (`internal/api`) binding to loopback with health and scan endpoints.
-- Release engineering and reproducible cross-platform packaging (`scripts/package-release.go`, GitHub Actions automation, SemVer linker metadata injection).
-- Configuration loading, secret redaction, context-injected `log/slog` logging.
+- **Dual Entrypoint Architecture:**
+  - **Interactive Terminal (TTY):** Bare `bouclier` launches directly into the interactive Bubble Tea **Security Workstation** dashboard.
+  - **Non-Interactive (CI/Pipes/Scripts):** Bare `bouclier` displays command help and flags with exit code `0`.
+  - **Explicit Subcommands:** `bouclier scan`, `bouclier history`, `bouclier intel`, `bouclier serve`, `bouclier mcp`, `bouclier config`, `bouclier version` bypass the workstation and execute standalone.
+  - **In-Process Integration:** Both interfaces call shared Go application packages (`internal/cli`, `internal/storage`, `internal/risk`, `internal/intel`) with zero subprocess spawns.
+- **7-Module Terminal Workstation (`internal/tui`):**
+  - `Target Scanner`: URL heuristics, domain, TLS, CT, HTTP, threat intelligence, and risk aggregation with interactive option toggles.
+  - `Scan History`: Browse, search/filter by target hostname, load historical assessments, delete records, and visualize trend correlation.
+  - `Threat Intelligence`: Local-first indicator matching, feed source management, secure credential indirection (`AuthHeaderEnv`), background sync, indicator pruning, and bundle exchange (`bouclier-intel-bundle/v1`).
+  - `Security Reports`: Report export to JSON (`bouclier-risk/v1`) and Markdown with atomic safe writes (`0600`).
+  - `Configuration Inspector`: Read-only parameter browser with strict token/credential redaction.
+  - `API & MCP Services`: In-process REST API daemon management and MCP stdio client setup guide.
+  - `About & Integrity`: Build metadata, MIT license text, 38 third-party open-source notices, and security disclosure policy.
+- **Universal Command Palette (`/` or `Ctrl+K`):** Searchable overlay for instant navigation and action execution.
+- **Local SQLite Persistence Engine (`internal/storage`):** Pure-Go `modernc.org/sqlite` with WAL mode, foreign keys, and zero CGO dependencies.
+- **Model Context Protocol (MCP) Server (`internal/mcpserver`):** Dedicated stdio JSON-RPC 2.0 interface exposing 7 analysis and threat intelligence tools.
 
 ## High-level architecture
 
-The application has a thin interface layer (CLI, TUI, and HTTP API) over a reusable scanning pipeline and persistence layer:
+The application uses a unified core engine with dual interactive/scriptable presentation layers:
 
 ```mermaid
 flowchart TD
-    User[User]
-    CLI[Cobra CLI: scan, history, config, version]
-    TUI[Bubble Tea Interactive TUI]
-    API[Loopback HTTP API Server]
+    User[User / Analyst]
+    TTYCheck{Is Interactive TTY?}
+    Workstation[Bubble Tea Security Workstation]
+    CLI[Cobra CLI: scan, history, intel, etc.]
+    API[Loopback HTTP REST Server]
+    MCP[Stdio JSON-RPC MCP Server]
 
-    Orch[Scan Orchestration / Pipeline]
-    StorageRepo[Storage Repository Interface]
-    SQLite[(SQLite Database: ~/.bouclier/bouclier.db)]
+    Core[Shared In-Process Core Engines]
+    StorageRepo[SQLite Storage Engine WAL]
+    RiskEngine[Risk Aggregator bouclier-risk/v1]
+    IntelEngine[Threat Intelligence Subsystem]
 
-    URLMod[URL & Domain Heuristics]
-    TLSMod[TLS & Cert Analysis]
-    CTMod[Certificate Transparency]
-    HTTPMod[Passive HTTP Inspection]
-    RiskEngine[Risk Aggregator & Scoring Engine]
+    User --> TTYCheck
+    TTYCheck -- Yes: bare bouclier --> Workstation
+    TTYCheck -- No or explicit cmd --> CLI
+    CLI -. bouclier serve .-> API
+    CLI -. bouclier mcp .-> MCP
 
-    User --> CLI
-    User --> TUI
-    User --> API
+    Workstation --> Core
+    CLI --> Core
+    API --> Core
+    MCP --> Core
+
+    Core --> StorageRepo
+    Core --> RiskEngine
+    Core --> IntelEngine
+```
 
     CLI --> Orch
     TUI --> Orch

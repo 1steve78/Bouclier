@@ -114,11 +114,36 @@ func TestRunVersion(t *testing.T) {
 	if !strings.Contains(out, "Bouclier v"+AppVersion) {
 		t.Fatalf("expected version %q in output:\n%s", AppVersion, out)
 	}
-	if !strings.Contains(out, "Go version:") {
-		t.Fatalf("expected Go version in output:\n%s", out)
+	if !strings.Contains(out, "Go:") && !strings.Contains(out, "Go version:") {
+		t.Fatalf("expected Go in output:\n%s", out)
 	}
 	if !strings.Contains(out, "Platform:") {
 		t.Fatalf("expected Platform in output:\n%s", out)
+	}
+	if !strings.Contains(out, "Commit:") {
+		t.Fatalf("expected Commit in output:\n%s", out)
+	}
+	if !strings.Contains(out, "Built:") {
+		t.Fatalf("expected Built in output:\n%s", out)
+	}
+}
+
+func TestBuildMetadataDefaults(t *testing.T) {
+	meta := GetBuildMetadata()
+	if meta.Version != "1.1.0-dev" {
+		t.Fatalf("expected default version '1.1.0-dev', got %q", meta.Version)
+	}
+	if meta.GoVersion == "" {
+		t.Fatal("expected non-empty GoVersion")
+	}
+	if meta.Platform == "" {
+		t.Fatal("expected non-empty Platform")
+	}
+	if meta.Commit == "" {
+		t.Fatal("expected Commit to be populated or 'unknown'")
+	}
+	if meta.Built == "" {
+		t.Fatal("expected Built to be populated or 'unknown'")
 	}
 }
 

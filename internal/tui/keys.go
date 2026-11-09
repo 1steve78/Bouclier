@@ -32,6 +32,23 @@ type KeyMap struct {
 	Filter6      key.Binding
 	PrevItem     key.Binding
 	NextItem     key.Binding
+
+	// Workstation navigation
+	Palette key.Binding
+	Mod1    key.Binding
+	Mod2    key.Binding
+	Mod3    key.Binding
+	Mod4    key.Binding
+	Mod5    key.Binding
+	Mod6    key.Binding
+	Mod7    key.Binding
+
+	// Workstation actions
+	Correlate key.Binding
+	Toggle    key.Binding
+	Prune     key.Binding
+	Start     key.Binding
+	Stop      key.Binding
 }
 
 // DefaultKeyMap returns the default set of keybindings.
@@ -148,6 +165,60 @@ func DefaultKeyMap() KeyMap {
 		NextItem: key.NewBinding(
 			key.WithKeys("n", "right"),
 			key.WithHelp("n", "next"),
+		),
+
+		Palette: key.NewBinding(
+			key.WithKeys("/", "ctrl+k"),
+			key.WithHelp("/ or ctrl+k", "palette"),
+		),
+		Mod1: key.NewBinding(
+			key.WithKeys("1"),
+			key.WithHelp("1", "scan URL"),
+		),
+		Mod2: key.NewBinding(
+			key.WithKeys("2"),
+			key.WithHelp("2", "history"),
+		),
+		Mod3: key.NewBinding(
+			key.WithKeys("3"),
+			key.WithHelp("3", "threat intel"),
+		),
+		Mod4: key.NewBinding(
+			key.WithKeys("4"),
+			key.WithHelp("4", "reports"),
+		),
+		Mod5: key.NewBinding(
+			key.WithKeys("5"),
+			key.WithHelp("5", "config"),
+		),
+		Mod6: key.NewBinding(
+			key.WithKeys("6"),
+			key.WithHelp("6", "services"),
+		),
+		Mod7: key.NewBinding(
+			key.WithKeys("7"),
+			key.WithHelp("7", "about"),
+		),
+
+		Correlate: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "correlate"),
+		),
+		Toggle: key.NewBinding(
+			key.WithKeys("t"),
+			key.WithHelp("t", "toggle"),
+		),
+		Prune: key.NewBinding(
+			key.WithKeys("p"),
+			key.WithHelp("p", "prune"),
+		),
+		Start: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "start"),
+		),
+		Stop: key.NewBinding(
+			key.WithKeys("x"),
+			key.WithHelp("x", "stop"),
 		),
 	}
 }

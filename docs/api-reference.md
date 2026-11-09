@@ -28,6 +28,14 @@ Example starting on a custom loopback port:
 bouclier serve --port 9090
 ```
 
+### 1.1 Managing the API Server from the Workstation (Module 6)
+
+In addition to launching `bouclier serve` via the command line, the API server can be managed directly in-process from the interactive workstation:
+1. Press `6` or open the Command Palette (`/` -> `API & MCP Services`).
+2. Press `s` to start the HTTP REST daemon on `127.0.0.1:8081`. The status updates to `● ACTIVE (127.0.0.1:8081)`.
+3. Press `x` to gracefully shut down the daemon.
+4. The workstation displays active loopback routes, port assignments, and health check endpoints in real time.
+
 > [!IMPORTANT]
 > **Loopback Binding Security Boundary:**
 > Because the current API endpoints are unauthenticated, Bouclier strictly enforces loopback binding (`127.0.0.1` or `::1`). Attempts to bind to external interfaces (such as `0.0.0.0` or public IP addresses) will be rejected on startup. If remote access is required, deploy a reverse proxy (e.g. Nginx, Envoy, Caddy) in front of Bouclier with mutual TLS or bearer token authentication.

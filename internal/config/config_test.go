@@ -9,10 +9,10 @@ import (
 
 func TestDefault(t *testing.T) {
 	c := Default()
-	if c.Application.Name != "Bouclier" || c.Application.Version != "0.1.0-dev" || c.Application.Environment != "development" {
+	if c.Application.Name != "Bouclier" || c.Application.Version != "1.1.0-dev" || c.Application.Environment != "development" {
 		t.Fatalf("unexpected application defaults: %+v", c.Application)
 	}
-	if c.Scanner.HTTPTimeout != 8*time.Second || c.Scanner.TLSHandshakeTimeout != 5*time.Second || c.Scanner.MaxRedirects != 5 || c.Scanner.MaxConcurrentScans != 10 || c.Scanner.UserAgent != "Bouclier/0.1.0-dev" {
+	if c.Scanner.HTTPTimeout != 8*time.Second || c.Scanner.TLSHandshakeTimeout != 5*time.Second || c.Scanner.MaxRedirects != 5 || c.Scanner.MaxConcurrentScans != 10 || c.Scanner.UserAgent != "Bouclier/1.1.0-dev" {
 		t.Fatalf("unexpected scanner defaults: %+v", c.Scanner)
 	}
 	if c.HTTPServer.Host != "127.0.0.1" || c.HTTPServer.Port != 8081 ||

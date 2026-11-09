@@ -6,6 +6,7 @@ import (
 	"bouclier/internal/cli"
 	"bouclier/internal/risk"
 	"bouclier/internal/storage"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ScanStartedMsg indicates a scan has officially initiated.
@@ -46,6 +47,13 @@ type AIModelsLoadedMsg struct {
 
 // TickMsg updates elapsed scan duration.
 type TickMsg time.Time
+
+// TickCmd produces a tick every 100ms during an active scan.
+func TickCmd() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+		return TickMsg(t)
+	})
+}
 
 // ExportCompletedMsg reports the outcome of exporting a report to disk.
 type ExportCompletedMsg struct {

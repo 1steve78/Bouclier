@@ -26,7 +26,7 @@ Below is a complete, annotated example configuration matching `configs/config.ex
 {
   "application": {
     "name": "Bouclier",
-    "version": "1.0.0-dev",
+    "version": "1.1.0-dev",
     "environment": "development"
   },
   "http_server": {
@@ -43,7 +43,7 @@ Below is a complete, annotated example configuration matching `configs/config.ex
     "tls_handshake_timeout": "5s",
     "max_redirects": 5,
     "max_concurrent_scans": 10,
-    "user_agent": "Bouclier/1.0.0-dev"
+    "user_agent": "Bouclier/1.1.0-dev"
   },
   "ai": {
     "enabled": false,

@@ -189,7 +189,17 @@ The correlation strength rules are:
 
 ## Chain contract summary
 
-The solidity interface is defined in `contracts/ThreatRegistry.abi.json` and `contracts/INTERFACE.md`. The on-chain payload is intentionally minimal: only `reportHash` and `riskLevel` are recorded. URLs, messages, and raw report payloads never enter the chain.
+The Solidity interface is defined in `contracts/ThreatRegistry.abi.json` and `contracts/INTERFACE.md`. The on-chain payload is intentionally minimal: only `reportHash` and `riskLevel` are recorded. URLs, messages, and raw report payloads never enter the chain.
+
+The deploying account is the permanent registry owner. It is the only account that can authorize or revoke reporters and correct a registered risk level. Only the owner and authorized reporters can submit reports, preventing an arbitrary account from front-running a public hash with a false risk level. Protect the owner key: it cannot be replaced after deployment.
+
+Compile the contract with Solidity 0.8.28 (or another compatible 0.8.x compiler):
+
+```powershell
+npx --yes solc@0.8.28 --bin --abi contracts/ThreatRegistry.sol -o build/contracts
+```
+
+Deploy `ThreatRegistry.sol` from the account intended to remain the owner. Before anchoring reports from another account, call `setAuthorizedReporter(address, true)` from the owner. If a submitted risk level needs correction, call `correctReportRiskLevel(bytes32, uint8)` from the owner; the correction is emitted as `ReportRiskCorrected`.
 
 Risk mapping:
 

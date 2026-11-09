@@ -1022,7 +1022,7 @@ func TestTUIScanAutoPersistence(t *testing.T) {
 	m.ScanChan = make(chan tea.Msg, 10)
 
 	// Trigger scan execution via StartScanCmd
-	cmd := StartScanCmd(m.ScanID, context.Background(), cfg, repo, m.ScanTarget, m.ScanChan)
+	cmd := StartScanCmd(m.ScanID, context.Background(), cfg, repo, m.ScanTarget, false, "exact", 8, m.ScanChan)
 	msg := cmd() // waits and returns message from channel
 
 	// Pass completed message to model Update
@@ -1555,5 +1555,394 @@ func TestTUISyncReliability(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "existing-malware.com") {
 		t.Errorf("expected search result in view after sync failure")
+	}
+}
+
+func TestCommandPaletteLifecycleAndFiltering(t *testing.T) {
+	m := NewModel(config.Default(), false)
+	if m.CurrentScreen != ScreenDashboard {
+		t.Fatalf("expected initial ScreenDashboard, got %v", m.CurrentScreen)
+	}
+
+	// 1. Open Command Palette via "/"
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	if m.CurrentScreen != ScreenCommandPalette {
+		t.Fatalf("expected ScreenCommandPalette, got %v", m.CurrentScreen)
+	}
+	if len(m.PaletteFiltered) == 0 {
+		t.Fatal("expected palette items to be populated")
+	}
+
+	// 2. Filter palette by typing "config"
+	m.filterPaletteItems("config")
+	if len(m.PaletteFiltered) == 0 {
+		t.Fatal("expected filtered items for 'config'")
+	}
+	if m.PaletteFiltered[0].Title != "Configuration Inspector" {
+		t.Fatalf("expected Configuration Inspector, got %s", m.PaletteFiltered[0].Title)
+	}
+
+	// 3. Execute navigation to Config screen
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.CurrentScreen != ScreenConfig {
+		t.Fatalf("expected navigation to ScreenConfig, got %v", m.CurrentScreen)
+	}
+
+	// 4. Open palette via ctrl+k from Config screen and dismiss via Esc
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	if m.CurrentScreen != ScreenCommandPalette {
+		t.Fatalf("expected ScreenCommandPalette, got %v", m.CurrentScreen)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.CurrentScreen != ScreenConfig {
+		t.Fatalf("expected return to ScreenConfig after Esc, got %v", m.CurrentScreen)
+	}
+
+	// 5. Test palette action: toggle color theme
+	themeAction := PaletteItem{
+		Title:    "Toggle Theme",
+		Action:   ActionToggleNoColor,
+		Category: "Action",
+	}
+	initialNoColor := m.Styles.NoColor
+	updated, _ = m.executePaletteItem(themeAction)
+	m = updated.(Model)
+	if m.Styles.NoColor == initialNoColor {
+		t.Fatalf("expected theme toggle to flip NoColor")
+	}
+}
+
+func TestWorkstationDashboardNavigation(t *testing.T) {
+	m := NewModel(config.Default(), false)
+	if m.CurrentScreen != ScreenDashboard {
+		t.Fatalf("expected ScreenDashboard, got %v", m.CurrentScreen)
+	}
+
+	// Arrow down on dashboard
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if m.DashboardSelectedIdx != 1 {
+		t.Fatalf("expected DashboardSelectedIdx=1, got %d", m.DashboardSelectedIdx)
+	}
+
+	// Arrow up returns to 0
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(Model)
+	if m.DashboardSelectedIdx != 0 {
+		t.Fatalf("expected DashboardSelectedIdx=0, got %d", m.DashboardSelectedIdx)
+	}
+
+	// Test 1-7 module jump keys
+	tests := []struct {
+		key      rune
+		expected Screen
+	}{
+		{'1', ScreenURLInput},
+		{'2', ScreenHistory},
+		{'3', ScreenIntel},
+		{'4', ScreenExport},
+		{'5', ScreenConfig},
+		{'6', ScreenServices},
+		{'7', ScreenAbout},
+	}
+
+	for _, tc := range tests {
+		m.CurrentScreen = ScreenDashboard
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tc.key}})
+		m = updated.(Model)
+		if m.CurrentScreen != tc.expected {
+			t.Errorf("key %c: expected %v, got %v", tc.key, tc.expected, m.CurrentScreen)
+		}
+	}
+
+	// Verify greeting is present on Dashboard view
+	m.CurrentScreen = ScreenDashboard
+	view := m.View()
+	greetingFound := strings.Contains(view, "Good morning") ||
+		strings.Contains(view, "Good afternoon") ||
+		strings.Contains(view, "Good evening") ||
+		strings.Contains(view, "Good night")
+	if !greetingFound {
+		t.Fatalf("expected time-of-day greeting on dashboard view:\n%s", view)
+	}
+	if !strings.Contains(view, "BOUCLIER") {
+		t.Fatalf("expected BOUCLIER title on dashboard view:\n%s", view)
+	}
+}
+
+func TestScanOptionsTogglesAndHotkeys(t *testing.T) {
+	m := NewModel(config.Default(), false)
+	m.CurrentScreen = ScreenURLInput
+
+	// Focus is initially 0 (URL text input)
+	if m.ScanInputFocus != 0 {
+		t.Fatalf("expected ScanInputFocus=0, got %d", m.ScanInputFocus)
+	}
+
+	// Tab to CT toggle (focus 1)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(Model)
+	if m.ScanInputFocus != 1 {
+		t.Fatalf("expected ScanInputFocus=1, got %d", m.ScanInputFocus)
+	}
+
+	// Toggle CT off with Space
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = updated.(Model)
+	if !m.ScanNoCT {
+		t.Fatal("expected ScanNoCT=true after space")
+	}
+
+	// Tab to CT match scope (focus 2)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(Model)
+	if m.ScanInputFocus != 2 {
+		t.Fatalf("expected ScanInputFocus=2, got %d", m.ScanInputFocus)
+	}
+	if m.ScanCTScope != "exact" {
+		t.Fatalf("expected initial scope 'exact', got %q", m.ScanCTScope)
+	}
+
+	// Toggle scope to registrable
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	m = updated.(Model)
+	if m.ScanCTScope != "registrable" {
+		t.Fatalf("expected scope 'registrable', got %q", m.ScanCTScope)
+	}
+
+	// Tab to Timeout selector (focus 3)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(Model)
+	if m.ScanInputFocus != 3 {
+		t.Fatalf("expected ScanInputFocus=3, got %d", m.ScanInputFocus)
+	}
+
+	// Cycle timeout with 't'
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = updated.(Model)
+	if m.ScanTimeoutSec != 15 {
+		t.Fatalf("expected 15s timeout, got %d", m.ScanTimeoutSec)
+	}
+
+	// View rendering contains options
+	view := m.View()
+	if !strings.Contains(view, "Certificate Transparency") {
+		t.Fatalf("expected CT options in view:\n%s", view)
+	}
+}
+
+func TestHistoryTargetFilteringAndCorrelation(t *testing.T) {
+	repo, err := storage.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	ctx := context.Background()
+
+	// Insert 2 scans for example.com and 1 for test.org
+	assessment1 := sampleTestAssessment()
+	assessment1.Target = "https://example.com"
+	assessment1.OverallScore = 30
+	record1 := storage.ScanRecord{
+		ID:             "scan-001",
+		Target:         "example.com",
+		OverallScore:   30,
+		Classification: "medium",
+		StartedAt:      time.Now().Add(-2 * time.Hour),
+		CompletedAt:    time.Now().Add(-2*time.Hour + time.Second),
+		Status:         storage.StatusCompleted,
+		SchemaVersion:  "bouclier-risk/v1",
+	}
+	_ = repo.SaveScan(ctx, record1, assessment1)
+
+	assessment2 := sampleTestAssessment()
+	assessment2.Target = "https://example.com"
+	assessment2.OverallScore = 75
+	record2 := storage.ScanRecord{
+		ID:             "scan-002",
+		Target:         "example.com",
+		OverallScore:   75,
+		Classification: "critical",
+		StartedAt:      time.Now().Add(-1 * time.Hour),
+		CompletedAt:    time.Now().Add(-1*time.Hour + time.Second),
+		Status:         storage.StatusCompleted,
+		SchemaVersion:  "bouclier-risk/v1",
+	}
+	_ = repo.SaveScan(ctx, record2, assessment2)
+
+	assessment3 := sampleTestAssessment()
+	assessment3.Target = "https://other.org"
+	assessment3.OverallScore = 10
+	record3 := storage.ScanRecord{
+		ID:             "scan-003",
+		Target:         "other.org",
+		OverallScore:   10,
+		Classification: "low",
+		StartedAt:      time.Now(),
+		CompletedAt:    time.Now().Add(time.Second),
+		Status:         storage.StatusCompleted,
+		SchemaVersion:  "bouclier-risk/v1",
+	}
+	_ = repo.SaveScan(ctx, record3, assessment3)
+
+	m := NewModelWithStorage(config.Default(), false, repo)
+	m.CurrentScreen = ScreenHistory
+	m.loadHistory()
+
+	if len(m.HistoryRecords) != 3 {
+		t.Fatalf("expected 3 initial history records, got %d", len(m.HistoryRecords))
+	}
+
+	// Filter by "example.com"
+	m.HistoryFilterText = "example.com"
+	m.loadHistory()
+	if len(m.HistoryRecords) != 2 {
+		t.Fatalf("expected 2 filtered records for example.com, got %d", len(m.HistoryRecords))
+	}
+
+	// Trigger trend correlation for example.com
+	m.correlateTarget("example.com")
+	if m.HistoryCorrelateErr != nil {
+		t.Fatalf("unexpected correlation error: %v", m.HistoryCorrelateErr)
+	}
+	if m.HistoryCorrelateReport == nil || len(m.HistoryCorrelateReport.Scans) != 2 {
+		t.Fatalf("expected 2 correlated scans, got %v", m.HistoryCorrelateReport)
+	}
+
+	m.CurrentScreen = ScreenHistoryCorrelate
+	view := m.View()
+	if !strings.Contains(view, "TARGET RISK TREND CORRELATION") {
+		t.Fatalf("expected correlation view banner:\n%s", view)
+	}
+	if !strings.Contains(view, "example.com") {
+		t.Fatalf("expected target in correlation view:\n%s", view)
+	}
+}
+
+func TestIntelSourceAddSecurityValidation(t *testing.T) {
+	repo, err := storage.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	m := NewModelWithStorage(config.Default(), false, repo)
+	m.CurrentScreen = ScreenIntelSourceAdd
+
+	// 1. Try submitting empty form
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.IntelAddErr == nil {
+		t.Fatal("expected error on empty source ID")
+	}
+
+	// 2. Populate ID, Name, Endpoint
+	m.IntelAddIDInput.SetValue("corp-feed")
+	m.IntelAddNameInput.SetValue("Corporate Feed")
+	m.IntelAddEndpointInput.SetValue("https://feeds.example.corp/feed.json")
+
+	// 3. Security test: attempt to pass secret value in AuthHeaderEnv
+	m.IntelAddEnvInput.SetValue("my-secret-token=abc 123")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.IntelAddErr == nil || !strings.Contains(m.IntelAddErr.Error(), "valid environment variable name") {
+		t.Fatalf("expected rejection of secret string in AuthHeaderEnv, got err = %v", m.IntelAddErr)
+	}
+
+	// 4. Pass clean environment variable name
+	m.IntelAddEnvInput.SetValue("CORP_FEED_AUTH_TOKEN")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.IntelAddErr != nil {
+		t.Fatalf("unexpected error registering source: %v", m.IntelAddErr)
+	}
+	if m.CurrentScreen != ScreenIntel {
+		t.Fatalf("expected transition to ScreenIntel, got %v", m.CurrentScreen)
+	}
+
+	// Verify source in database
+	sources, err := repo.ListSources(context.Background())
+	if err != nil || len(sources) != 1 {
+		t.Fatalf("expected 1 saved source, got %d, err = %v", len(sources), err)
+	}
+	if sources[0].AuthHeaderEnv != "CORP_FEED_AUTH_TOKEN" {
+		t.Fatalf("expected AuthHeaderEnv 'CORP_FEED_AUTH_TOKEN', got %q", sources[0].AuthHeaderEnv)
+	}
+}
+
+func TestInProcessAPIServerStartStop(t *testing.T) {
+	m := NewModel(config.Default(), false)
+	m.APIServerPort = 28081 // test port
+
+	// 1. Start server
+	m.startAPIServer()
+	if !m.APIServerRunning {
+		t.Fatalf("expected APIServerRunning=true, err = %v", m.APIServerErr)
+	}
+
+	// Give server time to bind
+	time.Sleep(50 * time.Millisecond)
+
+	// 2. Stop server
+	m.stopAPIServer()
+	if m.APIServerRunning {
+		t.Fatal("expected APIServerRunning=false after stop")
+	}
+}
+
+func TestConfigViewAndSecretRedaction(t *testing.T) {
+	cfg := config.Default()
+	cfg.ThreatIntel.FeedURLs = []string{
+		"https://user:verysecretpass@feed.example.org/api?token=secrettoken123",
+	}
+
+	view := RenderConfig(NewStyles(false), cfg, 80)
+	if strings.Contains(view, "verysecretpass") {
+		t.Fatal("password leaked in configuration view")
+	}
+	if strings.Contains(view, "secrettoken123") {
+		t.Fatal("query token leaked in configuration view")
+	}
+	if !strings.Contains(view, "REDACTED") {
+		t.Fatal("expected REDACTED placeholder in configuration view")
+	}
+	if !strings.Contains(view, "CONFIGURATION INSPECTOR") {
+		t.Fatal("expected title in view")
+	}
+}
+
+func TestAboutTabsAndIntegrityView(t *testing.T) {
+	styles := NewStyles(false)
+
+	// Tab 0: Metadata
+	v0 := RenderAbout(styles, 0, 0, 80)
+	if !strings.Contains(v0, "Bouclier | Security Intelligence Workstation") {
+		t.Fatalf("expected product title in metadata tab:\n%s", v0)
+	}
+	if !strings.Contains(v0, "1.1.0-dev") {
+		t.Fatalf("expected version 1.1.0-dev in metadata tab:\n%s", v0)
+	}
+
+	// Tab 1: MIT License
+	v1 := RenderAbout(styles, 1, 0, 80)
+	if !strings.Contains(v1, "MIT License") || !strings.Contains(v1, "Copyright (c) 2026 1steve78") {
+		t.Fatalf("expected MIT license text in license tab:\n%s", v1)
+	}
+
+	// Tab 2: Third-Party Notices
+	v2 := RenderAbout(styles, 2, 0, 80)
+	if !strings.Contains(v2, "38 open-source Go libraries") {
+		t.Fatalf("expected third-party notices summary in tab 2:\n%s", v2)
+	}
+
+	// Tab 3: Security & Responsible Disclosure
+	v3 := RenderAbout(styles, 3, 0, 80)
+	if !strings.Contains(v3, "Multi-Layer SSRF Defense") || !strings.Contains(v3, "Zero Plaintext Secrets") {
+		t.Fatalf("expected security model in tab 3:\n%s", v3)
 	}
 }

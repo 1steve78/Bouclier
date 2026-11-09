@@ -155,14 +155,19 @@ Bouclier supports explicit peer exchange of threat intelligence bundles:
 - `bouclier intel export <file> [--category <cat>] [--min-confidence <n>]`: Export validated collaborative bundle.
 - `bouclier intel prune [--dry-run] [--before <timestamp>]`: Remove expired records from local database.
 
-### TUI Commands
-- Press `I` from the Dashboard to open the Threat Intelligence screen.
-- Tab `1`: Overview, indicators count, and health status.
-- Tab `2`: Registered feed sources table.
-- Tab `3`: Interactive indicator search.
-- Press `U` to trigger asynchronous background feed synchronization (non-blocking).
-- Press `C` while synchronizing to cancel the active synchronization run safely.
-- Press `Esc` to return to the Dashboard.
+### Workstation Interactive Management (Module 3)
+In the interactive workstation, press `3` or open the Command Palette (`/` -> `Threat Intelligence`) to access Module 3:
+- **Tab `1` (Feed Sources):** Browse registered feeds in a table displaying ID, Provider Name, Type, Indicator Count, Enabled Status, and Last Sync.
+  - `t`: Toggle selected feed between Enabled and Disabled.
+  - `d`: Delete feed source (with interactive confirmation).
+  - `a`: Open interactive source registration dialog (enforces `AuthHeaderEnv` validation).
+  - `s`: Trigger full background sync across all enabled feeds.
+  - `S`: Sync currently highlighted feed only.
+  - `p`: Prune expired indicators (with interactive confirmation).
+  - `i`: Import threat intelligence bundle (`bouclier-intel-bundle/v1`).
+  - `e`: Export active indicators to a bundle.
+- **Tab `2` (Indicators):** Search local indicator database with real-time substring filtering, displaying type badges, confidence scores, and source provenance.
+- **Tab `3` (Status & Metrics):** Real-time database telemetry, storage footprint, and feed synchronization health metrics.
 
 ---
 

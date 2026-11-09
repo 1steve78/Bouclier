@@ -1,11 +1,74 @@
-# Bouclier
+# Bouclier | Security Intelligence Workstation
 
 [![CI](https://github.com/1steve78/Bouclier/actions/workflows/ci.yml/badge.svg)](https://github.com/1steve78/Bouclier/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](docs/versioning.md)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](docs/versioning.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/1steve78/Bouclier)](https://goreportcard.com/report/github.com/1steve78/Bouclier)
 
-Bouclier is an open-source, local-first URL intelligence, phishing detection, and website security posture assessment tool built with Go. It orchestrates passive URL heuristics, domain intelligence, TLS/certificate analysis, Certificate Transparency (CT) log verification, and HTTP response security checks into an explainable, deterministic risk scoring framework (`bouclier-risk/v1`).
+Bouclier is an open-source, local-first **Terminal-First Security Workstation** and command-line security assessment engine built with Go. It brings together URL heuristics, domain intelligence, TLS verification, Certificate Transparency (CT) log analysis, passive HTTP posture checks, and local threat intelligence into an explainable, deterministic risk scoring framework (`bouclier-risk/v1`).
+
+---
+
+## The Terminal-First Experience
+
+In v1.1.0, Bouclier shifts from a CLI tool with an optional TUI into an integrated **Terminal-First Security Workstation**:
+
+```bash
+# Simply run bouclier in any interactive terminal
+bouclier
+```
+
+Running bare `bouclier` launches directly into the interactive workstation dashboard. From here, security analysts, incident responders, and engineers navigate all capabilities using keyboard shortcuts without needing to memorize CLI commands:
+
+```text
+┌────────────────────────────────────────────────────────────────────────────┐
+│ BOUCLIER  •  Security Intelligence Workstation  •  v1.1.0                  │
+│ Unified Phishing Detection, TLS Inspection, Threat Intelligence & Risk     │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Good morning!  What would you like to investigate?
+
+╭─ Workstation Modules ──────────────────────────────────────────────────────╮
+│ ▶ [1] Target Scanner         Assess a target URL for phishing and TLS risks│
+│   [2] Scan History           Browse past assessments & correlate trends    │
+│   [3] Threat Intelligence    Manage threat feeds, search IOCs, sync/prune  │
+│   [4] Security Reports       Export assessments to JSON or Markdown        │
+│   [5] Configuration          Inspect active scanner, storage, and server   │
+│   [6] API & MCP Services     Control local REST daemon & view MCP setup    │
+│   [7] About & Integrity      Build metadata, MIT license, notices & policy │
+╰────────────────────────────────────────────────────────────────────────────╯
+```
+
+### "TUI-First, Not TUI-Only"
+Bouclier retains full CLI scriptability for automated workflows, CI/CD pipelines, and shell scripts:
+- **Interactive TTY**: Bare `bouclier` opens the Workstation Dashboard.
+- **Non-Interactive (Pipes / CI / Redirects)**: Bare `bouclier` cleanly displays standard command help and flags (exiting with code `0`).
+- **Explicit Subcommands**: `bouclier scan <url>`, `bouclier history`, `bouclier intel`, `bouclier serve`, `bouclier mcp`, etc., execute directly as pure CLI commands without launching or touching the TUI.
+- **Zero Subprocesses**: Both the Workstation and CLI execute the same shared in-process Go packages.
+
+### Visual Demonstration
+> [!NOTE]
+> *Terminal demonstration recording (e.g. `docs/assets/bouclier-workstation.gif` / asciinema) will be added here following maintainer acceptance. The ASCII representation above reflects the exact layout rendered by the Bubble Tea workstation runtime.*
+
+---
+
+## Quick Start
+
+Get started with Bouclier in seconds:
+
+```bash
+# 1. Launch the interactive workstation (in any interactive terminal)
+bouclier
+
+# 2. Or run a direct CLI security scan against a target URL
+bouclier scan https://example.com
+
+# 3. Check local threat intelligence status
+bouclier intel status
+
+# 4. View recent scan history
+bouclier history list
+```
 
 ---
 
@@ -160,11 +223,11 @@ bouclier history correlate example.com
 bouclier history correlate example.com --format json --output trend.json
 ```
 
-Correlation groups reports by exact normalized hostname, orders them chronologically, graphs the deterministic score, and compares consecutive reports for new and resolved findings. Finding identity is based on normalized code, category, title, and evidence. The latest 100 matching reports are used by default; `--limit` accepts up to 500. Output formats are `terminal`, `json`, and `markdown`. Correlation does not modify stored reports or recompute scores.
+Correlation groups reports by exact normalized hostname, orders them chronologically, graphs the deterministic score, and compares consecutive reports for new and resolved findings. Finding identity uses normalized code, category, and evidence (falling back to title when evidence is empty). The latest 100 matching reports are used by default; `--limit` accepts up to 500. Output formats are `terminal`, `json`, and `markdown`. Correlation does not modify stored reports or recompute scores.
 
 #### 3. Anchoring and Verifying Report Hashes
 
-The optional EVM registry records only the report's stored SHA-256 digest and a manually selected risk level. It does not publish the report, URL, or finding data. Deploy [`contracts/ThreatRegistry.sol`](./contracts/ThreatRegistry.sol) to an EVM-compatible network, then set the signing key in an environment variable:
+The optional EVM registry records the report's stored SHA-256 digest, a manually selected risk level, the submitting account, and the block timestamp. It does not publish the report, URL, or finding data. Compile with Solidity 0.8.28 using `npx --yes solc@0.8.28 --bin --abi contracts/ThreatRegistry.sol -o build/contracts`, then deploy [`contracts/ThreatRegistry.sol`](./contracts/ThreatRegistry.sol) from the account intended to remain the permanent owner. Only that owner and accounts it authorizes can submit report hashes; if Bouclier signs with another account, the owner must first call `setAuthorizedReporter(address, true)` for that address.
 
 ```powershell
 $env:BOUCLIER_EVM_PRIVATE_KEY = "<private-key>"
@@ -172,7 +235,7 @@ bouclier history anchor 7a9b2c3d --rpc-url https://<evm-rpc> --contract-address 
 bouclier history verify 7a9b2c3d --rpc-url https://<evm-rpc> --contract-address 0x<deployed-contract>
 ```
 
-Risk levels must be selected by a reviewer: `1` suspicious, `2` high risk, `3` confirmed malicious. Bouclier does not infer a confirmed-malicious status from its scan score. Anchor transaction metadata is also retained locally; the contract prevents duplicate hashes. Keep the signing key out of command arguments and config files, and use a test network before any production deployment.
+Risk levels must be selected by a reviewer: `1` suspicious, `2` high risk, `3` confirmed malicious. Bouclier does not infer a confirmed-malicious status from its scan score. Anchor transaction metadata is also retained locally; the contract prevents duplicate hashes. The owner can correct a registered risk level with `correctReportRiskLevel(bytes32, uint8)`. The signing key is read from `BOUCLIER_EVM_PRIVATE_KEY` by default; `--private-key-env` can select another environment-variable name, but never pass the private key itself as a flag or config value. Use HTTPS for hosted RPC endpoints and a test network before any production deployment. The `verify` command compares the local report digest with the contract and reports whether any locally saved anchor metadata matches.
 
 #### 4. Viewing a Historical Assessment
 

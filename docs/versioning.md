@@ -25,9 +25,9 @@ Bouclier adheres to [Semantic Versioning 2.0.0](https://semver.org/) (`vMAJOR.MI
 
 ### Development Builds
 When compiled directly from source without linker flags (e.g., `go build .` or `go run .`):
-- Version defaults to `1.0.0-dev`.
+- Version defaults to `1.1.0-dev`.
 - Build metadata is automatically extracted from local VCS records (`vcs.revision`, `vcs.time`) via `runtime/debug.ReadBuildInfo()`.
-- Development binaries clearly indicate `-dev` in `bouclier version` and in HTTP `User-Agent` headers (`Bouclier/1.0.0-dev`).
+- Development binaries clearly indicate `-dev` in `bouclier version` and in HTTP `User-Agent` headers (`Bouclier/1.1.0-dev`).
 
 ### Release Builds
 Official release binaries are built from annotated Git tags matching `v*` (e.g. `v1.0.0`):

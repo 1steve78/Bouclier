@@ -105,8 +105,10 @@ func findingFingerprint(finding risk.NormalizedFinding) string {
 	parts := []string{
 		normalizeFingerprintPart(finding.Code),
 		normalizeFingerprintPart(finding.Category),
-		normalizeFingerprintPart(finding.Title),
 		normalizeFingerprintPart(finding.Evidence),
+	}
+	if strings.TrimSpace(finding.Evidence) == "" {
+		parts = append(parts, normalizeFingerprintPart(finding.Title))
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:])

@@ -26,7 +26,7 @@ func Run(cfg *config.Config, opts Options) error {
 
 	// Check terminal interactivity unless forced (e.g. in test harness)
 	if !opts.ForceInteractive {
-		if !isInteractiveTerminal() {
+		if !IsInteractiveTerminal() {
 			return cli.NewExitError(
 				cli.ExitInvalidUsage,
 				"bouclier tui requires an interactive terminal (stdin and stdout must be attached to a terminal). Use 'bouclier scan <url>' for non-interactive scanning.",
@@ -70,7 +70,25 @@ func contextCanceled(err error) error {
 	return errors.New("scan cancelled by user")
 }
 
-func isInteractiveTerminal() bool {
+// isInteractiveTerminalFunc allows overriding terminal detection in automated tests.
+var isInteractiveTerminalFunc = defaultIsInteractiveTerminal
+
+// IsInteractiveTerminal reports whether stdin and stdout are attached to an interactive terminal.
+func IsInteractiveTerminal() bool {
+	return isInteractiveTerminalFunc()
+}
+
+// SetInteractiveTerminalForTesting overrides terminal interactivity detection for tests.
+// It returns a restore function that resets the original behavior.
+func SetInteractiveTerminalForTesting(fn func() bool) func() {
+	prev := isInteractiveTerminalFunc
+	isInteractiveTerminalFunc = fn
+	return func() {
+		isInteractiveTerminalFunc = prev
+	}
+}
+
+func defaultIsInteractiveTerminal() bool {
 	stdinFd := os.Stdin.Fd()
 	stdoutFd := os.Stdout.Fd()
 

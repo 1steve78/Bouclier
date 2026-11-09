@@ -18,6 +18,8 @@ Examples:
   bouclier history list --target example.com
   bouclier history list --classification critical
   bouclier history correlate example.com --format markdown --output trend.md
+  bouclier history anchor 7a9b2c3d --rpc-url https://rpc.example --contract-address 0x... --risk-level 1
+  bouclier history verify 7a9b2c3d --rpc-url https://rpc.example --contract-address 0x...
   bouclier history show 7a9b2c3d
   bouclier history show 7a9b2c3d --format markdown --output report.md
   bouclier history delete 7a9b2c3d`,
@@ -33,6 +35,8 @@ Examples:
 	historyCmd.AddCommand(newHistoryListCommand(getConfig))
 	historyCmd.AddCommand(newHistoryShowCommand(getConfig))
 	historyCmd.AddCommand(newHistoryCorrelateCommand(getConfig))
+	historyCmd.AddCommand(newHistoryAnchorCommand(getConfig))
+	historyCmd.AddCommand(newHistoryVerifyAnchorCommand(getConfig))
 	historyCmd.AddCommand(newHistoryDeleteCommand(getConfig))
 
 	return historyCmd
@@ -112,6 +116,44 @@ and supports terminal, JSON, or Markdown output.`,
 	cmd.Flags().IntVar(&opts.Limit, "limit", 100, "Maximum number of reports to compare (up to 500)")
 	cmd.Flags().StringVarP(&opts.Format, "format", "f", "terminal", "Output format (terminal, json, markdown)")
 	cmd.Flags().StringVarP(&opts.Output, "output", "o", "", "Write correlation report to a file")
+	return cmd
+}
+
+func newHistoryAnchorCommand(getConfig func() *config.Config) *cobra.Command {
+	var opts cli.ReportAnchorOptions
+	cmd := &cobra.Command{
+		Use:   "anchor <scan-id>",
+		Short: "Commit a reviewed report hash to an EVM registry",
+		Long: `Submit only the stored SHA-256 report hash and a manually selected risk level to a
+ThreatRegistry-compatible EVM contract. The report contents and target are not sent on-chain.
+The signing key must be provided through BOUCLIER_EVM_PRIVATE_KEY or the environment variable
+named by --private-key-env.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.ScanID = args[0]
+			return cli.RunHistoryAnchor(cmd.Context(), getConfig(), opts, cmd.OutOrStdout())
+		},
+	}
+	cmd.Flags().StringVar(&opts.RPCURL, "rpc-url", "", "EVM JSON-RPC endpoint URL")
+	cmd.Flags().StringVar(&opts.ContractAddress, "contract-address", "", "deployed ThreatRegistry contract address")
+	cmd.Flags().IntVar(&opts.RiskLevel, "risk-level", 0, "reviewer-selected registry level: 1 suspicious, 2 high risk, or 3 confirmed malicious")
+	cmd.Flags().StringVar(&opts.PrivateKeyEnv, "private-key-env", "BOUCLIER_EVM_PRIVATE_KEY", "environment variable containing the EVM signing key")
+	return cmd
+}
+
+func newHistoryVerifyAnchorCommand(getConfig func() *config.Config) *cobra.Command {
+	var opts cli.ReportVerifyOptions
+	cmd := &cobra.Command{
+		Use:   "verify <scan-id>",
+		Short: "Verify a saved report hash against an EVM registry",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.ScanID = args[0]
+			return cli.RunHistoryVerifyAnchor(cmd.Context(), getConfig(), opts, cmd.OutOrStdout())
+		},
+	}
+	cmd.Flags().StringVar(&opts.RPCURL, "rpc-url", "", "EVM JSON-RPC endpoint URL")
+	cmd.Flags().StringVar(&opts.ContractAddress, "contract-address", "", "deployed ThreatRegistry contract address")
 	return cmd
 }
 

@@ -1,135 +1,157 @@
-# Bouclier Interactive TUI Guide
+# Bouclier Workstation User Manual
 
-Bouclier features an interactive terminal user interface (TUI) powered by Charm's [Bubble Tea](https://github.com/charmbracelet/bubbletea) framework. The TUI provides a visual, keyboard-driven workflow for running URL assessments, inspecting security findings, browsing historical scans, managing local threat intelligence feeds, and exporting reports.
+Bouclier is a **Terminal-First Security Workstation** and local-first URL intelligence platform. Built with Charm's [Bubble Tea](https://github.com/charmbracelet/bubbletea), Lip Gloss, and Bubbles, the workstation provides a complete, keyboard-driven security investigation console in your terminal.
 
 ---
 
-## 1. Launching the TUI
+## 1. Launching the Workstation
 
-Start the interactive interface directly from your terminal:
+### Default Invocation
+In an interactive terminal, simply run:
+
+```bash
+bouclier
+```
+
+Bouclier detects the interactive TTY environment and launches directly into the Workstation Dashboard.
+
+### Explicit Launch
+You can also launch the workstation explicitly:
 
 ```bash
 bouclier tui
-```
-
-To load an explicit configuration file:
-
-```bash
 bouclier --config path/to/config.json tui
 ```
 
-### Terminal Requirements
-- **Dimensions:** Minimum 80 columns by 24 rows recommended. The TUI dynamically responds to terminal window resize events (`tea.WindowSizeMsg`).
-- **Colors:** Supports 256-color and truecolor ANSI terminals.
-- **Clean Exit:** Exiting via `q` or `Ctrl+C` cleanly restores cursor visibility and terminal state.
+### Non-Interactive CLI Preservation
+When run in scripts, CI/CD runners, or redirected pipelines (`|`, `>`), bare `bouclier` cleanly displays CLI usage and available flags (exiting with code `0`) without launching the TUI or hanging. Explicit subcommands (`bouclier scan`, `history`, `intel`, `serve`, `mcp`) always bypass the workstation.
 
 ---
 
-## 2. Screen Architecture
-
-The TUI is organized into specialized screens managed through a central state machine:
-
-```text
-               ┌───────────────┐
-               │   Dashboard   │◄─────────────────────────────┐
-               └───────┬───────┘                              │
-                       │                                      │
-       ┌───────────────┼───────────────┐                      │
-       ▼               ▼               ▼                      │
-┌──────────────┐┌──────────────┐┌──────────────┐              │
-│  URL Input   ││ Scan History ││ Threat Intel │              │
-└──────┬───────┘└──────────────┘└──────────────┘              │
-       │                                                      │
-       ▼                                                      │
-┌──────────────┐                                              │
-│   Scanning   │ (Progress & cancellation via 'c' or Esc)     │
-└──────┬───────┘                                              │
-       │                                                      │
-       ▼                                                      │
-┌──────────────┐       ┌──────────────┐       ┌──────────────┐│
-│   Overview   │──────►│   Findings   │──────►│Finding Detail││
-└──────┬───────┘       └──────────────┘       └──────────────┘│
-       │                                                      │
-       ├──────────────►┌──────────────┐                       │
-       │               │   Coverage   │                       │
-       │               └──────────────┘                       │
-       └──────────────►┌──────────────┐                       │
-                       │    Export    │───────────────────────┘
-                       └──────────────┘
-```
-
-1. **Dashboard (`ScreenDashboard`):** Landing screen displaying system status, quick actions, recent scan metrics, and navigation shortcuts.
-2. **URL Input (`ScreenURLInput`):** Target input dialog with client-side syntax and private IP/SSRF pre-validation.
-3. **Scanning (`ScreenScanning`):** Live pipeline progress tracking each analysis stage (URL heuristics, TLS certificate, CT logs, HTTP security, threat intelligence, risk scoring).
-4. **Overview (`ScreenOverview`):** High-level risk score gauge (0–100), classification banner (`low`, `guarded`, `elevated`, `high`, `severe`), target details, and category breakdown.
-5. **Findings (`ScreenFindings`):** Interactive, filterable list of all detected security issues with severity badges and category tags.
-6. **Finding Detail (`ScreenFindingDetail`):** Deep-dive view for a selected finding showing technical description, raw evidence, OWASP/CWE references, and remediation advice.
-7. **Coverage (`ScreenCoverage`):** Execution audit showing which analysis modules ran, duration, and whether any module timed out or was skipped.
-8. **Export (`ScreenExport`):** Interactive report generator supporting JSON and Markdown output formats with custom file path selection.
-9. **History (`ScreenHistory`):** Browse past scans stored in the local SQLite database, inspect earlier assessments, or delete records.
-10. **Threat Intelligence (`ScreenIntel`):** Tabbed interface to review indicator counts, inspect registered feed sources, trigger background sync (`U`), and search local IOCs.
-11. **Help (`ScreenHelp`):** Overlay showing keyboard shortcuts available in the current context.
-
----
-
-## 3. Global Keybindings & Navigation
+## 2. Global Navigation & Hotkeys
 
 | Key | Context | Action |
 |---|---|---|
-| `q` | Most screens | Quit application (or back if in sub-view) |
-| `Ctrl+C` | Global | Force quit application immediately |
+| `1`–`7` | Global / Dashboard | Jump directly to Workstation Modules 1 through 7 |
+| `/` or `Ctrl+K` | Global | Open the Universal Command Palette |
 | `?` | Global | Toggle context-aware Help screen |
 | `Esc` / `Backspace` | Sub-screens | Return to previous screen or cancel input |
-| `Enter` | Selection | Confirm input, open selected item, or trigger action |
-| `↑` / `k` | Lists / Menus | Navigate up |
-| `↓` / `j` | Lists / Menus | Navigate down |
-| `Tab` / `Shift+Tab`| Multi-field | Move focus between elements or tabs |
+| `Enter` | Selection | Confirm input, open selected module, or execute action |
+| `↑` / `k` | Menus / Lists | Move selection cursor up |
+| `↓` / `j` | Menus / Lists | Move selection cursor down |
+| `Tab` / `Shift+Tab` | Forms / Dialogs | Move focus between form fields or tabs |
+| `q` | Non-input screens | Quit Bouclier Workstation |
+| `Ctrl+C` | Global | Force quit immediately |
 
 ---
 
-## 4. Workflows
+## 3. The 7 Workstation Modules
 
-### 4.1 Running a Scan
-1. From the **Dashboard**, press `Enter` or `n` / `s` to open the **URL Input** dialog.
-2. Type or paste the target URL (e.g., `https://example.com` or `phishing-test.bank.xyz`).
-   - If the scheme is omitted, `https://` is automatically assumed.
-   - Private IP addresses, loopback ranges (`127.0.0.1`), and malformed URLs are rejected inline before execution.
-3. Press `Enter` to start the assessment.
-4. During scanning, watch stage-by-stage execution. Press `c` or `Esc` to cancel an in-flight scan at any time without freezing the UI.
-5. When complete, the TUI automatically transitions to the **Overview** screen.
+### Module 1: Target Scanner (`[1]`)
+Assess a website URL for phishing indicators, TLS configuration anomalies, certificate issues, and passive HTTP posture weaknesses.
 
-### 4.2 Inspecting Findings & Remediation
-1. From the **Overview** screen, press `f` to navigate to **Findings**.
-2. Filter findings by severity tier using number keys:
-   - `1`: Show **All** findings
-   - `2`: Filter **Critical** findings
-   - `3`: Filter **High** findings
-   - `4`: Filter **Medium** findings
-   - `5`: Filter **Low** findings
-   - `6`: Filter **Informational** findings
-3. Use `↑`/`↓` (or `k`/`j`) to highlight a finding and press `Enter` to view **Finding Detail**.
-4. In the detail screen, review the exact evidence observed (e.g. missing HTTP headers, weak cipher suites, suspicious certificate SANs) and remediation guidance.
-5. Press `Esc` to return to the findings list.
+- **URL Input:** Type or paste target (e.g. `example.com`, `https://sub.bank.org`). Bare domains default to `https://`.
+- **Options Toggles:**
+  - `Certificate Transparency` (`c` or `Space`): Toggle CT log querying on/off (equivalent to `--no-ct`).
+  - `CT Match Scope` (`o`): Switch between `exact` hostname and `registrable` domain matching.
+  - `Analysis Timeout` (`t`): Cycle timeout duration (5s / 8s / 15s / 30s).
+- **Asynchronous Execution:** Scans run non-blocking with an animated progress indicator and live elapsed timer.
+- **Stage Checklist:** Live status tracking across URL Analysis, Domain Intelligence, TLS & Certificates, Certificate Transparency, HTTP Security, Threat Intelligence, and Risk Aggregation.
+- **Cancellation:** Press `c` or `Esc` during an active scan to cancel immediately without freezing the UI.
+- **SSRF Defense:** Private IP ranges, loopback (`127.0.0.1`), link-local, and cloud metadata addresses are blocked.
 
-### 4.3 Exporting Reports
-1. From the **Overview** screen, press `e` to enter the **Export** dialog.
-2. Select between:
-   - **JSON:** Complete machine-readable `bouclier-risk/v1` schema.
-   - **Markdown:** Formatted summary suitable for documentation and incident tickets.
-3. Specify or confirm the destination file path.
-4. Press `Enter` to write the report to disk.
+### Module 2: Scan History (`[2]`)
+Browse, search, inspect, correlate, and manage past scan assessments saved in local SQLite storage.
 
-### 4.4 Browsing History
-1. From the **Dashboard**, press `h` to open **Scan History**.
-2. Scroll through historical assessments saved in the local SQLite database.
-3. Press `Enter` on any historical record to reload and inspect its full Overview, Findings, and Coverage screens.
-4. Press `d` or `x` to delete a selected historical scan record.
+- **Target Filtering (`f` / `F`):** Press `f` to filter history by target domain/hostname; press `F` to clear the filter.
+- **Open Report (`Enter`):** Loads the complete historical assessment into the Overview and Findings Explorer without re-running network checks.
+- **Trend Correlation (`c`):** Generates an on-the-fly historical trend report for the selected target host:
+  - Total historical scans, first seen, and last seen timestamps.
+  - Overall score evolution and net delta (`ELEVATING`, `IMPROVING`, `STABLE`).
+  - ASCII historical progression bar chart.
+  - Finding state transitions (newly emerged, recurring, and resolved findings).
+- **Export Report (`e`):** Directly export selected historical assessment to JSON or Markdown.
+- **Delete Scan (`d` / `x`):** Safely remove a scan record with an interactive `y`/`n` confirmation prompt.
+- **Pagination (`[` / `]`):** Page through historical records.
 
-### 4.5 Threat Intelligence Management
-1. From the **Dashboard**, press `i` to enter the **Threat Intelligence** screen.
-2. Use `Tab` / `Shift+Tab` (or number keys) to switch between tabs:
-   - **Tab 1 (Status):** Database metrics, active indicator counts, feed freshness.
-   - **Tab 2 (Sources):** Configured local and HTTPS feeds, last sync timestamp, and status.
-   - **Tab 3 (Search):** Interactive search against the local IOC database.
-3. Press `U` to initiate background feed synchronization. Sync runs asynchronously without blocking the UI.
-4. Press `c` during an active sync to cancel safely.
+### Module 3: Threat Intelligence (`[3]`)
+Manage local-first threat indicators and collaborative feed sources.
+
+- **Tab 1: Overview & Health (`1`):** Displays total active indicators, breakdown by source, database health, last sync status, and quick actions.
+- **Tab 2: Sources Management (`2`):**
+  - Browse configured feed sources (ID, Name, Type, Status).
+  - Add Source (`a`): Register a new local JSON file or HTTPS feed.
+    > [!IMPORTANT]
+    > **Credential Security:** Feed credentials must be specified via environment variable names (e.g. `BOUCLIER_FEED_TOKEN`), never entered as plaintext secrets.
+  - Toggle Source (`t`): Enable or disable a feed source.
+  - Delete Source (`d`): Remove source and cascade-delete its associated indicators with confirmation.
+- **Tab 3: Indicator Search (`3`):** Search local SQLite database for indicators matching a domain, URL, IP, or threat category.
+- **Feed Synchronization (`u`):** Trigger asynchronous feed updates in the background. Press `c` to cancel.
+- **Prune Expired Indicators (`p`):** Clean expired indicators from local storage with confirmation.
+- **Bundle Exchange:**
+  - Import Bundle (`m`): Ingest indicators from a `bouclier-intel-bundle/v1` JSON file.
+  - Export Bundle (`x`): Save active local indicators into a portable JSON bundle file.
+
+### Module 4: Security Reports (`[4]`)
+Export active assessments or historical reports into structured formats.
+
+- **Formats:**
+  - **JSON (`bouclier-risk/v1`):** Canonical machine-readable assessment schema with full evidence, coverage audits, and score contributions.
+  - **Markdown (`.md`):** Clean GitHub Flavored Markdown report suitable for documentation, audits, and incident tickets.
+- **Destination Path:** Editable file path input (defaults to `bouclier-report.json` or `bouclier-report.md`).
+- **Atomic Safe Writes:** All exports are written using atomic safe file creation with user-only `0600` permissions.
+
+### Module 5: Configuration Inspector (`[5]`)
+Read-only inspector displaying all active runtime parameters:
+
+- **Subsystems:** Application metadata, Scanner parameters, SQLite Storage engine, Threat Intelligence feeds, Loopback HTTP Server settings, Logging, and AI / Ollama parameters.
+- **Credential Redaction:** Any URLs containing credentials or sensitive query tokens (`token`, `key`, `secret`, `password`) are automatically masked as `[REDACTED]`.
+
+### Module 6: API & MCP Services (`[6]`)
+Manage background network and integration services.
+
+- **Loopback REST API Daemon:**
+  - In-process HTTP server binding strictly to loopback (`127.0.0.1:8081`).
+  - Interactive Controls: Press `s` to start the REST server; press `x` to stop it.
+  - Endpoints catalog: `GET /health`, `POST /api/v1/scan`, `GET /api/v1/history`, `GET /api/v1/intel/stats`, `POST /api/v1/intel/sync`.
+- **Model Context Protocol (MCP) Server:**
+  - Dedicated stdio JSON-RPC 2.0 interface for AI assistants (Claude Desktop, Cursor, Antigravity).
+  - Stdio isolation note explaining why MCP runs as a separate CLI process (`bouclier mcp`).
+  - 7 Exposed MCP Tools catalog (`scan_url`, `get_scan`, `list_scans`, `search_intel`, `get_intel_stats`, `sync_intel_feeds`, `get_config`).
+  - Copyable configuration snippets for `claude_desktop_config.json`.
+
+### Module 7: About & Integrity (`[7]`)
+Built-in application metadata and compliance inspector.
+
+- **Tab 1: Build Metadata (`1`):** Semantic version (`v1.1.0`), Git commit hash, UTC build timestamp, Go compiler version, target OS/Arch, pure-Go SQLite WAL engine.
+- **Tab 2: MIT License (`2`):** Scrollable full text of the official 2026 MIT license.
+- **Tab 3: Third-Party Notices (`3`):** Comprehensive breakdown of all 38 third-party open-source dependencies.
+- **Tab 4: Security & Integrity (`4`):** Security guarantees, multi-layer SSRF protections, memory bounding, and responsible vulnerability disclosure policy.
+
+---
+
+## 4. Universal Command Palette (`/` or `Ctrl+K`)
+
+Press `/` or `Ctrl+K` from anywhere in the workstation to open the searchable Command Palette:
+
+```text
+┌─ COMMAND PALETTE  Search actions & navigate ──────────────────────────────┐
+│ > config                                                                  │
+│ ──────────────────────────────────────────────────────────────────────────│
+│ ▶ [Navigate]  Configuration Inspector   Inspect active scanner settings   │
+│ ──────────────────────────────────────────────────────────────────────────│
+│ ↑/↓ navigate  •  Enter execute  •  Esc dismiss                            │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+- Live interactive substring filtering across commands, screens, and administrative actions.
+- Use `↑`/`↓` to highlight an action and press `Enter` to execute.
+- Press `Esc` to dismiss and return to the active screen.
+
+---
+
+## 5. Accessibility & Theme Options
+
+- **Color Themes:** Full 256-color palette with high-contrast score and severity badges.
+- **Monochrome Mode:** Respects the standard `NO_COLOR` environment variable or can be toggled on-the-fly via the Command Palette (`Toggle Color Theme`).
+- **Responsive Layout:** Automatically adjusts card widths and table columns on terminal resize (`tea.WindowSizeMsg`). Displays an advisory notice if the terminal is below 80x24.

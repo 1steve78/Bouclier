@@ -26,7 +26,7 @@ Every release archive contains:
 ### Option A: Manual Download & PowerShell Setup (Recommended)
 
 1. **Download the archive**:
-   Download `bouclier_v1.0.0_windows_amd64.zip` (or `_arm64.zip` for ARM-based Surface devices) from the [GitHub Releases](https://github.com/1steve78/Bouclier/releases) page.
+   Download `bouclier_v1.1.0_windows_amd64.zip` (or `_arm64.zip` for ARM-based Surface devices) from the [GitHub Releases](https://github.com/1steve78/Bouclier/releases) page.
 
 2. **Extract the archive using PowerShell**:
    ```powershell
@@ -34,7 +34,7 @@ Every release archive contains:
    New-Item -ItemType Directory -Force -Path "$HOME\AppData\Local\Programs\bouclier"
 
    # Extract archive
-   Expand-Archive -Path "bouclier_v1.0.0_windows_amd64.zip" -DestinationPath "$HOME\AppData\Local\Programs\bouclier" -Force
+   Expand-Archive -Path "bouclier_v1.1.0_windows_amd64.zip" -DestinationPath "$HOME\AppData\Local\Programs\bouclier" -Force
    ```
 
 3. **Add to user PATH**:
@@ -61,12 +61,12 @@ Every release archive contains:
 1. **Download and extract the archive**:
    ```bash
    # For AMD64 (x86_64)
-   curl -LO https://github.com/1steve78/Bouclier/releases/download/v1.0.0/bouclier_v1.0.0_linux_amd64.tar.gz
-   tar -xzf bouclier_v1.0.0_linux_amd64.tar.gz
+   curl -LO https://github.com/1steve78/Bouclier/releases/download/v1.1.0/bouclier_v1.1.0_linux_amd64.tar.gz
+   tar -xzf bouclier_v1.1.0_linux_amd64.tar.gz
 
    # Or for ARM64 (e.g. Raspberry Pi, AWS Graviton)
-   # curl -LO https://github.com/1steve78/Bouclier/releases/download/v1.0.0/bouclier_v1.0.0_linux_arm64.tar.gz
-   # tar -xzf bouclier_v1.0.0_linux_arm64.tar.gz
+   # curl -LO https://github.com/1steve78/Bouclier/releases/download/v1.1.0/bouclier_v1.1.0_linux_arm64.tar.gz
+   # tar -xzf bouclier_v1.1.0_linux_arm64.tar.gz
    ```
 
 2. **Move to system PATH & set executable permissions**:
@@ -92,12 +92,12 @@ Every release archive contains:
 1. **Download and extract**:
    ```bash
    # For Apple Silicon (M1/M2/M3/M4)
-   curl -LO https://github.com/1steve78/Bouclier/releases/download/v1.0.0/bouclier_v1.0.0_darwin_arm64.tar.gz
-   tar -xzf bouclier_v1.0.0_darwin_arm64.tar.gz
+   curl -LO https://github.com/1steve78/Bouclier/releases/download/v1.1.0/bouclier_v1.1.0_darwin_arm64.tar.gz
+   tar -xzf bouclier_v1.1.0_darwin_arm64.tar.gz
 
    # For Intel Macs
-   # curl -LO https://github.com/1steve78/Bouclier/releases/download/v1.0.0/bouclier_v1.0.0_darwin_amd64.tar.gz
-   # tar -xzf bouclier_v1.0.0_darwin_amd64.tar.gz
+   # curl -LO https://github.com/1steve78/Bouclier/releases/download/v1.1.0/bouclier_v1.1.0_darwin_amd64.tar.gz
+   # tar -xzf bouclier_v1.1.0_darwin_amd64.tar.gz
    ```
 
 2. **Install to `/usr/local/bin`**:
@@ -109,6 +109,13 @@ Every release archive contains:
    ```bash
    bouclier version
    ```
+
+4. **Launch the Workstation**:
+   In any interactive terminal, execute:
+   ```bash
+   bouclier
+   ```
+   This immediately opens the full Bouclier Security Intelligence Workstation dashboard.
 
 > [!NOTE]
 > Homebrew tap distribution is planned for future releases. Package-manager distribution is not yet provided; always download verified binaries from official GitHub releases.

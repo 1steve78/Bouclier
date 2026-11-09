@@ -10,6 +10,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.1.0] - 2026-11-09
+
+### Product Evolution: Bouclier | Security Intelligence Workstation
+Evolved Bouclier from a CLI tool with an optional TUI into a fully integrated, production-grade **Terminal-First Security Workstation**.
+
+### Added
+- **Terminal-First Dual Entrypoint:**
+  - Bare `bouclier` invocation in an interactive terminal (TTY) automatically launches directly into the Workstation Dashboard.
+  - Non-interactive invocations (CI/CD pipelines, background scripts, redirected stdout/stdin) preserve the standard CLI help and exit code `0`.
+  - Explicit CLI subcommands (`scan`, `history`, `intel`, `serve`, `mcp`, `config`, `version`, `tui`) execute standalone without TUI interception.
+  - Shared in-process architecture: both CLI and Workstation call shared Go engine services with zero subprocess spawning.
+- **7-Module Workstation Navigation:**
+  - `[1] Target Scanner`: Interactive URL input with pre-validation, Certificate Transparency (`--no-ct`) toggle, match scope (`exact`/`registrable`) toggle, and request timeout cycle.
+  - `[2] Scan History`: Filter historical scans by target domain, load stored assessments into findings explorer without rescanning, delete scans with confirmation dialogs, and launch trend correlation.
+  - `[3] Threat Intelligence`: Manage feed sources, register sources with environment-variable credential indirection (`--auth-header-env`), toggle feeds, search local indicators, prune expired indicators, and exchange bundles.
+  - `[4] Security Reports`: Export assessments to JSON (`bouclier-risk/v1`) or Markdown with custom path input and secure atomic file writes (`0600`).
+  - `[5] Configuration Inspector`: Read-only structured view of all subsystem parameters with strict token/credential redaction (`[REDACTED]`).
+  - `[6] API & MCP Services`: In-process loopback REST API server start/stop daemon controls on `127.0.0.1:8081`, combined with MCP stdio isolation guidance, copyable client snippets, and tool catalog.
+  - `[7] About & Integrity`: Built-in tabbed inspector for build metadata, MIT License text, 38 third-party open-source notices, and security architecture guarantees.
+- **Universal Command Palette (`/` or `Ctrl+K`):**
+  - Instant searchable modal overlay accessible from anywhere across the workstation.
+  - Fuzzy/prefix text search across workstation modules, navigation destinations, and administrative actions.
+- **Multi-Scan Trend Correlation (`ScreenHistoryCorrelate`):**
+  - Interactive visualization of historical target security posture evolution.
+  - ASCII risk progression bars, score evolution net delta, and finding state transitions (newly emerged, recurring, and resolved findings).
+- **In-TUI In-Process REST API Server Manager:**
+  - Direct start/stop controls for the loopback HTTP daemon inside the workstation.
+- **Accessibility & UX Polish:**
+  - Time-of-day dynamic greeting (`Good morning!`, `Good afternoon!`, `Good evening!`, `Good night!`).
+  - Real-time system status card (total scans, 24h count, threat feeds, active indicators, SQLite WAL connection status).
+  - Responsive layout handling with minimum terminal window advisory (80x24).
+  - Full `NO_COLOR` and monochrome theme toggling.
+
+---
+
 ## [1.0.0] - 2026-11-09
 
 Initial public release of Bouclier — an open-source, local-first URL intelligence and website security assessment platform.

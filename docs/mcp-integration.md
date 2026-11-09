@@ -20,6 +20,10 @@ bouclier --config /path/to/config.json mcp
 
 All logging and status diagnostics are routed strictly to `stderr`, keeping `stdout` reserved exclusively for JSON-RPC 2.0 messages.
 
+> [!NOTE]
+> **Workstation & Stdio Stream Isolation:**
+> The Model Context Protocol (MCP) server requires exclusive control over standard input and standard output to exchange framed JSON-RPC 2.0 messages. For this reason, the MCP server runs via `bouclier mcp` in your AI client harnesses (Claude Desktop, Cursor, Antigravity) and cannot be multiplexed into the interactive workstation TUI without corrupting protocol frames. The Workstation's **[6] API & MCP Services** screen provides immediate reference documentation, tool catalogs, and copyable client configuration snippets.
+
 ---
 
 ## 2. Available Tools

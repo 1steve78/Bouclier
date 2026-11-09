@@ -29,7 +29,10 @@ func RunHistoryCorrelate(ctx context.Context, cfg *config.Config, opts HistoryCo
 		return NewExitError(ExitInvalidUsage, "%v", err)
 	}
 	limit := opts.Limit
-	if limit <= 0 {
+	if limit < 0 {
+		return NewExitError(ExitInvalidUsage, "correlation limit cannot be negative")
+	}
+	if limit == 0 {
 		limit = 100
 	}
 	if limit > 500 {
@@ -42,27 +45,35 @@ func RunHistoryCorrelate(ctx context.Context, cfg *config.Config, opts HistoryCo
 	}
 	defer repo.Close()
 
-	candidates, err := repo.ListScans(ctx, storage.ListFilter{
-		Target: target, Limit: 500, SortBy: "started_at", SortOrder: "desc",
-	})
-	if err != nil {
-		return NewExitError(ExitGeneralError, "query scan history for %q: %w", target, err)
-	}
-
 	entries := make([]report.CorrelationEntry, 0, limit)
-	for _, record := range candidates {
-		host, hostErr := canonicalCorrelationHost(record.Target)
-		if hostErr != nil || host != target {
-			continue
-		}
-		entry, err := repo.GetScanEntry(ctx, record.ID)
-		if err != nil {
-			return NewExitError(ExitGeneralError, "load report %s for correlation: %w", record.ShortID(), err)
-		}
-		entries = append(entries, report.CorrelationEntry{
-			ID: record.ID, StartedAt: record.StartedAt, Assessment: entry.Assessment,
+	for offset := 0; len(entries) < limit; {
+		candidates, err := repo.ListScans(ctx, storage.ListFilter{
+			Target: target, Limit: 500, Offset: offset, SortBy: "started_at", SortOrder: "desc",
 		})
-		if len(entries) == limit {
+		if err != nil {
+			return NewExitError(ExitGeneralError, "query scan history for %q: %w", target, err)
+		}
+		if len(candidates) == 0 {
+			break
+		}
+		for _, record := range candidates {
+			host, hostErr := canonicalCorrelationHost(record.Target)
+			if hostErr != nil || host != target {
+				continue
+			}
+			entry, err := repo.GetScanEntry(ctx, record.ID)
+			if err != nil {
+				return NewExitError(ExitGeneralError, "load report %s for correlation: %w", record.ShortID(), err)
+			}
+			entries = append(entries, report.CorrelationEntry{
+				ID: record.ID, StartedAt: record.StartedAt, Assessment: entry.Assessment,
+			})
+			if len(entries) == limit {
+				break
+			}
+		}
+		offset += len(candidates)
+		if len(candidates) < 500 {
 			break
 		}
 	}

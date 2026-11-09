@@ -1,6 +1,22 @@
 # Bouclier CLI Reference
 
-This document provides a comprehensive command-line reference for Bouclier v1.0.0.
+This document provides a comprehensive command-line reference for Bouclier v1.1.0.
+
+---
+
+## Workstation Entrypoint & CLI Scriptability
+
+Starting in v1.1.0, Bouclier features a TTY-aware entrypoint:
+
+```bash
+# Bare invocation
+bouclier
+```
+
+- **Interactive Terminal (TTY)**: When `stdin` and `stdout` are attached to an interactive terminal, running `bouclier` automatically launches the interactive **Bouclier Workstation**.
+- **Non-Interactive Environments**: When running in automated scripts, CI/CD runners, background jobs, or through standard I/O redirection/pipes (`|`, `>`), bare `bouclier` displays command help and flags and exits with code `0`.
+- **Explicit Subcommands**: All subcommands (`bouclier scan`, `bouclier history`, `bouclier intel`, `bouclier serve`, `bouclier mcp`, `bouclier config`, `bouclier version`) bypass the workstation and execute standalone as pure CLI commands without any TUI interception.
+- **Dedicated TUI command**: `bouclier tui` remains available for explicitly launching the interactive workstation.
 
 ---
 

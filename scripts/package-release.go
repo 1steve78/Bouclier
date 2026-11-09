@@ -32,7 +32,7 @@ var supportedTargets = []Target{
 
 func main() {
 	var (
-		version = flag.String("version", "1.0.0", "Release version (e.g. 1.0.0)")
+		version = flag.String("version", "1.1.0", "Release version (e.g. 1.1.0)")
 		commit  = flag.String("commit", "", "Git commit hash (defaults to git rev-parse)")
 		date    = flag.String("date", "", "Build date UTC (defaults to current time)")
 		outDir  = flag.String("outdir", "dist", "Output directory for release archives")

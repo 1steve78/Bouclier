@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Verify Code Formatting
+        run: |
+          DIFF=$(gofmt -l .)
+          if [ -n "$DIFF" ]; then
+            echo "Unformatted Go files detected:"
+            echo "$DIFF"
+            exit 1
+          fi
+
+      - name: Verify go.mod & go.sum Cleanliness
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Go Vet
+        run: go vet ./...
+
+      - name: Run Test Suite (with Race Detector)
+        run: go test -v -race -count=1 ./...
+
+      - name: Package Release Archives
+        run: |
+          go run scripts/package-release.go -version "${GITHUB_REF_NAME}" -outdir dist
+
+      - name: Verify Checksums & Archive Manifest
+        run: |
+          ls -la dist/
+          echo "### Release Checksums (${GITHUB_REF_NAME})" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          cat dist/checksums.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Create GitHub Release & Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false

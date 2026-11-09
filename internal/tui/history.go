@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"bouclier/internal/storage"
+	"github.com/charmbracelet/bubbles/textinput"
 )
 
 // RenderHistory renders the persisted scan history explorer screen.
@@ -18,6 +19,9 @@ func RenderHistory(
 	deleteConfirm bool,
 	deleteID string,
 	statusMsg string,
+	filterInput textinput.Model,
+	isFiltering bool,
+	activeFilter string,
 	width int,
 ) string {
 	contentWidth := width - 6
@@ -30,16 +34,30 @@ func RenderHistory(
 
 	var b strings.Builder
 	b.WriteString(styles.Title.Render("SCAN HISTORY") + "\n")
-	b.WriteString(styles.Subtitle.Render(fmt.Sprintf("%d total scan assessment(s) stored in local database", total)) + "\n\n")
+
+	subText := fmt.Sprintf("%d total scan assessment(s) stored in local database", total)
+	if activeFilter != "" {
+		subText += fmt.Sprintf(" (filtered by %q)", activeFilter)
+	}
+	b.WriteString(styles.Subtitle.Render(subText) + "\n\n")
+
+	// Filter bar
+	if isFiltering {
+		b.WriteString(styles.Bold.Render("Filter Target: ") + filterInput.View())
+		b.WriteString("\n" + styles.Muted.Render("Press Enter to apply filter, Esc to cancel.") + "\n\n")
+	} else if activeFilter != "" {
+		b.WriteString(styles.Muted.Render(fmt.Sprintf("Active Filter: %s (press 'f' to change, 'F' to clear)", styles.Bold.Render(activeFilter))) + "\n\n")
+	}
 
 	if len(records) == 0 {
 		var empty strings.Builder
 		empty.WriteString(styles.CardTitle.Render("No Scan History") + "\n\n")
-		empty.WriteString(styles.Muted.Render("No previous scans found in local SQLite database.\nPress [ Esc ] to return to dashboard, or [ S ] to start a scan."))
+		empty.WriteString(styles.Muted.Render("No previous scans match the current filter.\nPress [ Esc ] to return to dashboard, or [ S ] to start a new scan."))
 		b.WriteString(styles.Card.Width(contentWidth).Render(empty.String()))
 		b.WriteString("\n\n")
 		b.WriteString(styles.FormatKeybar([][2]string{
 			{"S", "New Scan"},
+			{"F", "Clear Filter"},
 			{"Esc", "Back to Dashboard"},
 		}))
 		return b.String()
@@ -119,6 +137,8 @@ func RenderHistory(
 		b.WriteString(styles.FormatKeybar([][2]string{
 			{"↑/↓ (j/k)", "Navigate"},
 			{"Enter", "Open Report"},
+			{"C", "Correlate Trend"},
+			{"F", "Filter Target"},
 			{"E", "Export"},
 			{"D", "Delete"},
 			{"[ / ]", "Page"},

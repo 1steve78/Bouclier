@@ -21,6 +21,7 @@ import (
 	"bouclier/internal/risk"
 	"bouclier/internal/storage"
 	"bouclier/internal/tlsintel"
+	"bouclier/internal/tui"
 	"bouclier/internal/webintel"
 )
 
@@ -85,6 +86,26 @@ func TestRootCommandHelp(t *testing.T) {
 	}
 }
 
+func TestBareRootCommandNonInteractivePreservesHelp(t *testing.T) {
+	// Force non-interactive terminal detection
+	cleanup := tui.SetInteractiveTerminalForTesting(func() bool { return false })
+	defer cleanup()
+
+	stdout, stderr, err := executeCommandWithStreams()
+	if err != nil {
+		t.Fatalf("expected bare command in non-interactive terminal to exit 0 with help, got error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got: %q", stderr)
+	}
+	if !strings.Contains(stdout, "Bouclier is a terminal-first security workstation") {
+		t.Fatalf("expected workstation banner in help output:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "Commands:") {
+		t.Fatalf("expected Commands section in help output:\n%s", stdout)
+	}
+}
+
 func TestTUICommandHelp(t *testing.T) {
 	out, err := executeCommand("tui", "--help")
 	if err != nil {
@@ -139,10 +160,10 @@ func TestVersionCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, "Bouclier v0.1.0-dev") {
+	if !strings.Contains(out, "Bouclier v"+cli.AppVersion) {
 		t.Fatalf("version output missing expected version:\n%s", out)
 	}
-	if !strings.Contains(out, "Go version:") {
+	if !strings.Contains(out, "Go:") && !strings.Contains(out, "Go version:") {
 		t.Fatalf("version output missing Go version:\n%s", out)
 	}
 }
@@ -168,7 +189,7 @@ func TestConfigShowWithCustomFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgFile := filepath.Join(tmpDir, "custom.json")
 	customContent := `{
-  "application": {"name": "Bouclier", "version": "0.1.0-dev", "environment": "test"},
+  "application": {"name": "Bouclier", "version": "1.1.0-dev", "environment": "test"},
   "scanner": {"http_timeout": "12s", "tls_handshake_timeout": "7s", "max_redirects": 3, "max_concurrent_scans": 5, "user_agent": "CustomAgent/1.0"},
   "storage": {"database_path": "test.db", "cache_ttl": "12h"},
   "threat_intelligence": {"feed_update_interval": "12h", "feed_urls": []},
@@ -194,8 +215,8 @@ func TestConfigShowSecretRedactionInCommand(t *testing.T) {
 	sensitiveURL := fmt.Sprintf("https://user:%s@feed.example.com/api?token=%s", fakeSecret, fakeSecret)
 
 	content := fmt.Sprintf(`{
-  "application": {"name": "Bouclier", "version": "0.1.0-dev", "environment": "test"},
-  "scanner": {"http_timeout": "8s", "tls_handshake_timeout": "5s", "max_redirects": 5, "max_concurrent_scans": 10, "user_agent": "Bouclier/0.1.0-dev"},
+  "application": {"name": "Bouclier", "version": "1.1.0-dev", "environment": "test"},
+  "scanner": {"http_timeout": "8s", "tls_handshake_timeout": "5s", "max_redirects": 5, "max_concurrent_scans": 10, "user_agent": "Bouclier/1.1.0-dev"},
   "storage": {"database_path": "test.db", "cache_ttl": "24h"},
   "threat_intelligence": {"feed_update_interval": "24h", "feed_urls": [%q]},
   "logging": {"level": "info", "structured": false}
@@ -432,7 +453,7 @@ func TestHistoryCommandHierarchy(t *testing.T) {
 	cfgPath := filepath.Join(tmpDir, "config.json")
 
 	cfgJSON := fmt.Sprintf(`{
-		"application": {"name": "Bouclier", "version": "0.1.0-dev", "environment": "test"},
+		"application": {"name": "Bouclier", "version": "1.1.0-dev", "environment": "test"},
 		"storage": {"database_path": %q, "cache_ttl": "24h"}
 	}`, dbPath)
 	if err := os.WriteFile(cfgPath, []byte(cfgJSON), 0600); err != nil {
@@ -450,7 +471,9 @@ func TestHistoryCommandHierarchy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("history --help error: %v", err)
 	}
-	if !strings.Contains(out, "history list") || !strings.Contains(out, "history show") || !strings.Contains(out, "history delete") {
+	if !strings.Contains(out, "history list") || !strings.Contains(out, "history show") ||
+		!strings.Contains(out, "history correlate") || !strings.Contains(out, "history anchor") ||
+		!strings.Contains(out, "history verify") || !strings.Contains(out, "history delete") {
 		t.Fatalf("unexpected history help output:\n%s", out)
 	}
 

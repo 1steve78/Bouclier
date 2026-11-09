@@ -26,11 +26,28 @@ func SetScanRunnerForTesting(fn scanRunnerFunc) func() {
 
 // StartScanCmd creates a background goroutine to execute the scan pipeline asynchronously.
 // It returns a tea.Cmd that listens for progress messages from the scan channel.
-func StartScanCmd(scanID uint64, ctx context.Context, cfg *config.Config, repo storage.Repository, target string, msgChan chan tea.Msg) tea.Cmd {
+func StartScanCmd(
+	scanID uint64,
+	ctx context.Context,
+	cfg *config.Config,
+	repo storage.Repository,
+	target string,
+	noCT bool,
+	ctScope string,
+	timeoutSec int,
+	msgChan chan tea.Msg,
+) tea.Cmd {
 	go func() {
+		timeout := time.Duration(timeoutSec) * time.Second
+		if timeout <= 0 {
+			timeout = 8 * time.Second
+		}
 		opts := cli.ScanOptions{
 			Target:  target,
 			Storage: repo,
+			NoCT:    noCT,
+			CTScope: ctScope,
+			Timeout: timeout,
 		}
 
 		onProgress := func(stage cli.ScanStage, state cli.StageState, message string) {
@@ -72,23 +89,13 @@ func StartScanCmd(scanID uint64, ctx context.Context, cfg *config.Config, repo s
 	return WaitForScanMsg(msgChan)
 }
 
-// WaitForScanMsg reads a single message from the scan channel.
+// WaitForScanMsg returns a Bubble Tea command that waits for the next message from the channel.
 func WaitForScanMsg(msgChan chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
-		if msgChan == nil {
-			return nil
-		}
 		msg, ok := <-msgChan
 		if !ok {
 			return nil
 		}
 		return msg
 	}
-}
-
-// TickCmd triggers periodic timer ticks while a scan is in progress.
-func TickCmd() tea.Cmd {
-	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
-		return TickMsg(t)
-	})
 }

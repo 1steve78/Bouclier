@@ -6,6 +6,7 @@ import (
 	"bouclier/internal/cli"
 	"bouclier/internal/config"
 	"bouclier/internal/logging"
+	"bouclier/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -15,10 +16,14 @@ func newRootCommand() *cobra.Command {
 
 	rootCmd := &cobra.Command{
 		Use:   "bouclier",
-		Short: "Intelligent phishing detection and website security scanner.",
-		Long: `Bouclier is a command-line application for phishing detection and website security assessment.
-It brings together URL heuristic analysis, domain intelligence, TLS verification,
-and passive website security checks into a unified, explainable risk assessment.
+		Short: "Bouclier | Security Intelligence Workstation",
+		Long: `Bouclier is a terminal-first security workstation and command-line engine for
+phishing detection, URL intelligence, domain analysis, TLS inspection,
+and passive website security assessment.
+
+Running 'bouclier' directly in an interactive terminal launches the full
+security workstation dashboard. In non-interactive pipelines or scripts,
+it displays command help and flags.
 
 Commands:
   tui       Launch the interactive terminal user interface
@@ -31,13 +36,14 @@ Commands:
   config    Inspect active scanner and application settings
 
 Examples:
-  bouclier tui
-  bouclier scan https://example.com
+  bouclier                                      # Launch interactive workstation
+  bouclier scan https://example.com             # CLI scan
   bouclier scan https://example.com --format json
   bouclier scan https://example.com --format markdown --output report.md
   bouclier scan https://example.com --no-ct --timeout 15s
   bouclier history list
   bouclier history show <scan-id>
+  bouclier intel status
   bouclier mcp
   bouclier serve
   bouclier config show
@@ -64,6 +70,9 @@ Examples:
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if tui.IsInteractiveTerminal() {
+				return tui.Run(cfg, tui.Options{})
+			}
 			return cmd.Help()
 		},
 	}

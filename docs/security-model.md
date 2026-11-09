@@ -106,3 +106,21 @@ Scanning untrusted websites exposes the analyzer to resource exhaustion attacks:
 - At request time, Bouclier resolves `os.Getenv(envVar)`.
 - SQLite database migrations actively delete legacy plaintext credential columns.
 - Credentials never appear in logs, debug dumps, terminal screens, or exported JSON/Markdown reports.
+
+---
+
+## 5. Workstation TUI Security Architecture
+
+The Bouclier Terminal-First Security Workstation introduces dedicated terminal interaction while upholding all security invariants:
+
+1. **In-Process Shared Services:**
+   - The workstation interface never spawns shell subprocesses (`exec.Command("bouclier", ...)`) to perform scans or manage data.
+   - All operations invoke identical in-process Go application services (`internal/cli`, `internal/storage`, `internal/risk`, `internal/intel`), eliminating shell escaping, injection vulnerabilities, and IPC latency.
+2. **Dynamic Credential Masking:**
+   - The Configuration Inspector (Module 5) dynamically redacts sensitive fields matching keys such as `token`, `secret`, `password`, `key`, and `auth`, rendering them as `[REDACTED]`.
+3. **Atomic Safe Report Writing:**
+   - Report exports (Module 4) write to temporary files before atomically replacing target files via `os.Rename` with strict `0600` file permissions.
+4. **Interactive Deletion Safeguards:**
+   - Destructive operations (deleting scan history, deleting threat intelligence sources, and pruning expired indicators) require explicit two-step keyboard confirmation (`y`/`n`), preventing accidental data loss.
+5. **Loopback Daemon Isolation:**
+   - The embedded REST API server controlled via Module 6 binds exclusively to `127.0.0.1` or `::1`, rejecting external network interfaces.
